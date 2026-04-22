@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import requests
 
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import CommandStart
 from aiogram.types import (
     Message,
     CallbackQuery,
@@ -77,16 +77,7 @@ async def grant_access(user_id: int, days: int):
         pass
 
 
-async def has_access(user_id: int):
-    cursor.execute("SELECT expire_date FROM users WHERE user_id=?", (user_id,))
-    row = cursor.fetchone()
-
-    if not row:
-        return False
-
-    return datetime.fromisoformat(row[0]) > datetime.utcnow()
-
-# ================== KEYBOARDS (FIXED v3) ==================
+# ================== KEYBOARDS ==================
 def menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -184,7 +175,7 @@ async def pre_checkout(pre: PreCheckoutQuery):
 
 
 @router.message(F.successful_payment)
-async def success_payment(message: Message):
+async def stars_success(message: Message):
     payload = message.successful_payment.invoice_payload
 
     if payload.startswith("stars_"):
@@ -192,13 +183,31 @@ async def success_payment(message: Message):
         await grant_access(message.from_user.id, PLANS[plan]["days"])
 
 
-# ================== CRYPTO ==================
+# ================== CRYPTO FIX ==================
 @router.callback_query(F.data.startswith("pay_crypto_"))
 async def pay_crypto(call: CallbackQuery):
     plan = call.data.split("_")[2]
     data = PLANS[plan]
 
-    invoice_id = f"{call.from_user.id}_{plan}_{int(datetime.utcnow().timestamp())}"
+    url = "https://pay.crypt.bot/api/createInvoice"
+    headers = {"Crypto-Pay-API-Token": CRYPTO_TOKEN}
+
+    r = requests.post(url, headers=headers, json={
+        "asset": "USDT",
+        "amount": data["crypto"],
+        "description": f"{plan} days access",
+        "allow_comments": False
+    })
+
+    res = r.json()
+
+    if not res.get("ok"):
+        await call.message.answer("❌ Ошибка создания платежа")
+        return
+
+    invoice = res["result"]
+    invoice_id = invoice["invoice_id"]
+    pay_url = invoice["pay_url"]
 
     cursor.execute(
         "INSERT INTO payments VALUES (?, ?, ?, ?)",
@@ -206,11 +215,33 @@ async def pay_crypto(call: CallbackQuery):
     )
     conn.commit()
 
-    await call.message.answer("💰 Проверяем оплату...")
+    await call.message.answer(
+        f"💰 Оплата создана:\n{pay_url}\n\n⏳ Ожидание подтверждения..."
+    )
 
-    await asyncio.sleep(5)
+    # 🔁 проверка оплаты
+    for _ in range(30):  # ~3 минуты
+        check = requests.post(
+            "https://pay.crypt.bot/api/getInvoices",
+            headers=headers,
+            json={"invoice_ids": invoice_id}
+        ).json()
 
-    await grant_access(call.from_user.id, data["days"])
+        try:
+            status = check["result"]["items"][0]["status"]
+        except:
+            status = None
+
+        if status == "paid":
+            await grant_access(call.from_user.id, data["days"])
+            await call.message.answer("✅ Оплата подтверждена")
+            break
+
+        if status == "expired":
+            await call.message.answer("❌ Счёт истёк")
+            break
+
+        await asyncio.sleep(6)
 
     await call.answer()
 
