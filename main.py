@@ -177,7 +177,7 @@ def pay(prefix, plan):
     ])
 
 
-# ================== START ==================
+# ================== START (ОБНОВЛЕНО ТОЛЬКО ТУТ) ==================
 @router.message(CommandStart())
 async def start(message: Message):
     user_id = message.from_user.id
@@ -203,7 +203,15 @@ async def start(message: Message):
                 )
             return
 
-    await message.answer("👋 Выбери оплату:", reply_markup=menu())
+    await message.answer(
+        "👋 Привет, я Ева и это мой закрытый канал\n\n"
+        "❓ Что внутри?\n\n"
+        "Закрытый контент по подписке\n\n"
+        "💎 Без ограничений\n"
+        "🔥 Обновления регулярно\n\n"
+        "Выбери способ оплаты 👇",
+        reply_markup=menu()
+    )
 
 
 # ================== HISTORY ==================
