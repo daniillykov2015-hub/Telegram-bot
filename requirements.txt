@@ -1,0 +1,10 @@
+[project]
+name = "telegram-channel-access-bot"
+version = "0.1.0"
+description = "Telegram Stars bot that sells one-time access links to a private channel"
+authors = ["Your Name <you@example.com>"]
+requires-python = ">=3.11"
+dependencies = [
+    "aiogram==2.25.2",
+    "requests>=2.33.1",
+]
