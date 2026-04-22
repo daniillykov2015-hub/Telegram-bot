@@ -5,23 +5,32 @@ import requests
 import sqlite3
 from datetime import datetime, timedelta
 
-from aiogram import Bot, Dispatcher, types, ContentType
+from aiogram import Bot, Dispatcher, types
 from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
-    LabeledPrice
+    LabeledPrice,
+    ContentType
 )
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# =========================
+# =====================
 # ENV
-# =========================
+# =====================
 API_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GROUP_ID = os.getenv("TELEGRAM_GROUP_ID")
 CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
 ADMIN_ID = os.getenv("ADMIN_ID")
+
+if not API_TOKEN:
+    raise RuntimeError("TELEGRAM_BOT_TOKEN не задан")
+
+if not GROUP_ID:
+    raise RuntimeError("TELEGRAM_GROUP_ID не задан")
+
+GROUP_ID = int(GROUP_ID)
 
 try:
     ADMIN_ID = int(ADMIN_ID) if ADMIN_ID else None
@@ -29,28 +38,16 @@ except:
     ADMIN_ID = None
 
 
-# =========================
-# SAFETY CHECK (ЧТОБ НЕ ПАДАЛ)
-# =========================
-if not API_TOKEN:
-    raise RuntimeError("❌ TELEGRAM_BOT_TOKEN не задан")
-
-if not GROUP_ID:
-    raise RuntimeError("❌ TELEGRAM_GROUP_ID не задан")
-
-GROUP_ID = int(GROUP_ID)
-
-
-# =========================
-# BOT INIT
-# =========================
+# =====================
+# BOT INIT (aiogram 2.x)
+# =====================
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
 
-# =========================
+# =====================
 # DB
-# =========================
+# =====================
 conn = sqlite3.connect("users.db")
 cursor = conn.cursor()
 
@@ -88,9 +85,9 @@ CREATE TABLE IF NOT EXISTS payments_log (
 conn.commit()
 
 
-# =========================
+# =====================
 # PLANS
-# =========================
+# =====================
 PLANS = {
     "plan_1": {"amount": 550, "title": "1 день", "days": 1},
     "plan_7": {"amount": 770, "title": "7 дней", "days": 7},
@@ -98,9 +95,9 @@ PLANS = {
 }
 
 
-# =========================
-# CRYPTO
-# =========================
+# =====================
+# CRYPTO API
+# =====================
 class CryptoPayError(Exception):
     pass
 
@@ -141,22 +138,17 @@ def check_invoice(invoice_id):
     if not data.get("ok"):
         raise CryptoPayError(data)
 
-    items = data["result"]["items"]
-    return items[0]["status"]
+    return data["result"]["items"][0]["status"]
 
 
-# =========================
-# UI
-# =========================
+# =====================
+# KEYBOARDS
+# =====================
 def main_kb():
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
-        InlineKeyboardButton("⭐ Stars", callback_data="stars_menu"),
-        InlineKeyboardButton("💰 Crypto", callback_data="crypto_menu"),
-    )
-    kb.add(
-        InlineKeyboardButton("🎁 Реферал", callback_data="ref"),
-        InlineKeyboardButton("📅 Подписка", callback_data="sub"),
+        InlineKeyboardButton("⭐ Stars", callback_data="stars"),
+        InlineKeyboardButton("💰 Crypto", callback_data="crypto"),
     )
     return kb
 
@@ -164,42 +156,39 @@ def main_kb():
 def plans_kb():
     kb = InlineKeyboardMarkup()
     kb.add(
-        InlineKeyboardButton("1 день - 550", callback_data="plan_1"),
-        InlineKeyboardButton("7 дней - 770", callback_data="plan_7"),
-        InlineKeyboardButton("30 дней - 1100", callback_data="plan_30"),
+        InlineKeyboardButton("1 день", callback_data="plan_1"),
+        InlineKeyboardButton("7 дней", callback_data="plan_7"),
+        InlineKeyboardButton("30 дней", callback_data="plan_30"),
     )
     return kb
 
 
-# =========================
+# =====================
 # START
-# =========================
+# =====================
 @dp.message_handler(commands=["start"])
 async def start(m: types.Message):
-    await m.answer(
-        "🔥 Бот запущен",
-        reply_markup=main_kb()
-    )
+    await m.answer("Бот работает ✅", reply_markup=main_kb())
 
 
-# =========================
-# MENU
-# =========================
-@dp.callback_query_handler(lambda c: c.data == "stars_menu")
+# =====================
+# MENUS
+# =====================
+@dp.callback_query_handler(lambda c: c.data == "stars")
 async def stars(call: types.CallbackQuery):
-    await call.message.answer("Выбери тариф:", reply_markup=plans_kb())
+    await call.message.answer("Тарифы:", reply_markup=plans_kb())
     await call.answer()
 
 
-@dp.callback_query_handler(lambda c: c.data == "crypto_menu")
+@dp.callback_query_handler(lambda c: c.data == "crypto")
 async def crypto(call: types.CallbackQuery):
-    await call.message.answer("Crypto оплата:", reply_markup=plans_kb())
+    await call.message.answer("Crypto тарифы:", reply_markup=plans_kb())
     await call.answer()
 
 
-# =========================
-# CRYPTO BUY
-# =========================
+# =====================
+# BUY
+# =====================
 @dp.callback_query_handler(lambda c: c.data.startswith("plan_"))
 async def buy(call: types.CallbackQuery):
     plan = PLANS[call.data]
@@ -213,13 +202,16 @@ async def buy(call: types.CallbackQuery):
     conn.commit()
 
     kb = InlineKeyboardMarkup().add(
-        InlineKeyboardButton("Я оплатил", callback_data="check")
+        InlineKeyboardButton("Проверить оплату", callback_data="check")
     )
 
     await call.message.answer(invoice["pay_url"], reply_markup=kb)
     await call.answer()
 
 
+# =====================
+# CHECK PAYMENT
+# =====================
 @dp.callback_query_handler(lambda c: c.data == "check")
 async def check(call: types.CallbackQuery):
     cursor.execute(
@@ -229,7 +221,7 @@ async def check(call: types.CallbackQuery):
     row = cursor.fetchone()
 
     if not row:
-        await call.message.answer("Нет счёта")
+        await call.message.answer("Счёт не найден")
         return
 
     invoice_id, days = row
@@ -254,29 +246,31 @@ async def check(call: types.CallbackQuery):
         member_limit=1
     )
 
-    await call.message.answer(f"Доступ до {expire.date()}\n{invite.invite_link}")
+    await call.message.answer(
+        f"Доступ до {expire.date()}\n{invite.invite_link}"
+    )
 
 
-# =========================
-# SUB
-# =========================
+# =====================
+# SUBSCRIPTION
+# =====================
 @dp.callback_query_handler(lambda c: c.data == "sub")
 async def sub(call: types.CallbackQuery):
     cursor.execute("SELECT expire_date FROM users WHERE user_id=?", (call.from_user.id,))
     row = cursor.fetchone()
 
-    if not row or not row[0]:
-        text = "Нет подписки"
-    else:
-        text = f"До: {row[0]}"
+    text = "Нет подписки"
+
+    if row and row[0]:
+        text = f"Действует до: {row[0]}"
 
     await call.message.answer(text)
     await call.answer()
 
 
-# =========================
-# RUN SAFE
-# =========================
+# =====================
+# SAFE START
+# =====================
 async def start_bot():
     try:
         await dp.start_polling()
