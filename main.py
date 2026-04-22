@@ -1,10 +1,6 @@
 import asyncio
 import logging
 import os
-import sqlite3
-from datetime import datetime
-
-# Современные импорты для aiogram 3.x
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -14,10 +10,13 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Получение токена из переменных окружения Railway
+# Загрузка токена из переменных окружения
 API_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-# Инициализация (в версии 3.x Dispatcher не принимает bot при создании)
+if not API_TOKEN:
+    logger.error("КРИТИЧЕСКАЯ ОШИБКА: TELEGRAM_BOT_TOKEN не найден в настройках!")
+
+# Инициализация (в 3.x бот передается только в метод start_polling)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
@@ -36,11 +35,10 @@ def get_payment_kb():
     builder.row(InlineKeyboardButton(text="Назад", callback_data="back_to_main"))
     return builder.as_markup()
 
-# --- Обработчики (Handlers) ---
+# --- Обработчики ---
 
 @dp.message(Command("start"))
 async def start_handler(message: types.Message):
-    """Обработка команды /start"""
     await message.answer(
         "🔒 Добро пожаловать в закрытый канал MistyBibi!\n\n"
         "Выберите действие:",
@@ -49,10 +47,10 @@ async def start_handler(message: types.Message):
 
 @dp.callback_query(F.data == "stars_menu")
 async def stars_menu_handler(call: types.CallbackQuery):
-    """Переход в меню оплаты. Используем try, чтобы избежать ошибки 'message is not modified'"""
     try:
+        # Изменяем текст, чтобы избежать ошибки "message is not modified"
         await call.message.edit_text(
-            "💎 Выберите тариф для оплаты через Telegram Stars:",
+            "💎 Тарифы для оплаты через Telegram Stars:",
             reply_markup=get_payment_kb()
         )
     except Exception:
@@ -60,7 +58,6 @@ async def stars_menu_handler(call: types.CallbackQuery):
 
 @dp.callback_query(F.data == "back_to_main")
 async def back_handler(call: types.CallbackQuery):
-    """Возврат в главное меню"""
     try:
         await call.message.edit_text(
             "🔒 Главное меню MistyBibi.\n\nВыберите действие:",
@@ -69,17 +66,12 @@ async def back_handler(call: types.CallbackQuery):
     except Exception:
         await call.answer()
 
-@dp.message(Command("ping"))
-async def ping_handler(message: types.Message):
-    """Проверка доступности бота"""
-    await message.answer("Бот онлайн! ✅")
-
 # --- Запуск ---
 
 async def main():
     logger.info("Удаление старых запросов и запуск бота...")
     try:
-        # Эта строка критически важна для Railway, чтобы убить старые процессы (ConflictError)
+        # ЭТО КЛЮЧЕВАЯ СТРОКА: решает ошибку ConflictError
         await bot.delete_webhook(drop_pending_updates=True)
         await dp.start_polling(bot)
     finally:
