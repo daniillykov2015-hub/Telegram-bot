@@ -1,208 +1,156 @@
 import asyncio
 import logging
 import os
-import sqlite3
+import requests
 from datetime import datetime, timedelta
 
-import requests
-from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import Message, CallbackQuery
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-# ---------------- CONFIG ----------------
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-GROUP_ID = int(os.getenv("TELEGRAM_GROUP_ID", "0"))
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+from aiogram.filters import Command
 
 logging.basicConfig(level=logging.INFO)
 
-bot = Bot(TOKEN)
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
+
+bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# ---------------- DB ----------------
-conn = sqlite3.connect("users.db")
-cursor = conn.cursor()
+# ---------------- PAYMENTS ---------------- #
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    expire_date TEXT,
-    ref_by INTEGER
-)
-""")
-
-conn.commit()
-
-# ---------------- UTIL ----------------
-def parse_args(message: types.Message) -> str:
-    """
-    SAFE ARG PARSER (v3 replacement for get_args)
-    """
-    text = message.text or ""
-    parts = text.split(maxsplit=1)
-    return parts[1] if len(parts) > 1 else ""
+PLANS = {
+    "1": {"days": 1, "stars": 550, "crypto": 5},
+    "7": {"days": 7, "stars": 770, "crypto": 7},
+    "30": {"days": 30, "stars": 1100, "crypto": 10},
+}
 
 
-def get_expire(user_id: int):
-    cursor.execute("SELECT expire_date FROM users WHERE user_id=?", (user_id,))
-    row = cursor.fetchone()
+def crypto_create_invoice(amount, payload):
+    url = "https://pay.crypt.bot/api/createInvoice"
+    headers = {"Crypto-Pay-API-Token": CRYPTO_TOKEN}
 
-    if row and row[0]:
-        try:
-            return datetime.fromisoformat(row[0])
-        except:
-            return None
-    return None
+    r = requests.post(url, headers=headers, json={
+        "asset": "USDT",
+        "amount": amount,
+        "description": payload
+    })
 
-
-def set_expire(user_id: int, days: int):
-    expire = datetime.now() + timedelta(days=days)
-
-    cursor.execute("""
-    INSERT INTO users (user_id, expire_date)
-    VALUES (?, ?)
-    ON CONFLICT(user_id)
-    DO UPDATE SET expire_date=excluded.expire_date
-    """, (user_id, expire.isoformat()))
-
-    conn.commit()
-    return expire
+    data = r.json()
+    return data["result"]
 
 
-# ---------------- KEYBOARD ----------------
+def crypto_check(invoice_id):
+    url = "https://pay.crypt.bot/api/getInvoices"
+    headers = {"Crypto-Pay-API-Token": CRYPTO_TOKEN}
+
+    r = requests.get(url, headers=headers, params={"invoice_ids": invoice_id})
+    data = r.json()
+
+    return data["result"]["items"][0]["status"]
+
+
+# ---------------- UI ---------------- #
+
 def main_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📅 Подписка", callback_data="sub")],
-        [InlineKeyboardButton(text="🎁 Рефералка", callback_data="ref")],
-        [InlineKeyboardButton(text="ℹ️ Инфо", callback_data="info")]
+        [InlineKeyboardButton(text="⭐ Stars", callback_data="stars")],
+        [InlineKeyboardButton(text="💰 Crypto", callback_data="crypto")],
+        [InlineKeyboardButton(text="ℹ Info", callback_data="info")]
     ])
 
 
-# ---------------- START ----------------
+def plans_kb(prefix: str):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="1 день", callback_data=f"{prefix}_1")],
+        [InlineKeyboardButton(text="7 дней", callback_data=f"{prefix}_7")],
+        [InlineKeyboardButton(text="30 дней", callback_data=f"{prefix}_30")],
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
+    ])
+
+
+# ---------------- START ---------------- #
+
 @dp.message(Command("start"))
-async def start(message: types.Message):
-    args = parse_args(message)
-
-    # referral
-    if args.isdigit():
-        ref_id = int(args)
-        if ref_id != message.from_user.id:
-            cursor.execute("SELECT user_id FROM users WHERE user_id=?", (message.from_user.id,))
-            if not cursor.fetchone():
-                cursor.execute(
-                    "INSERT INTO users (user_id, ref_by) VALUES (?, ?)",
-                    (message.from_user.id, ref_id)
-                )
-                conn.commit()
-
+async def start(message: Message):
     await message.answer(
-        "🔥 STABLE CORE v3\n\nВыбери действие:",
+        "🔒 Добро пожаловать\nВыбери оплату:",
         reply_markup=main_kb()
     )
 
 
-# ---------------- CALLBACKS ----------------
-@dp.callback_query()
-async def router(call: types.CallbackQuery):
-    await call.answer()
-    data = call.data
+# ---------------- MENU ---------------- #
 
-    # BACK / INFO
-    if data == "info":
-        await call.message.edit_text(
-            "ℹ️ Это стабильный core бот v3.\nБез падений и старых багов.",
-            reply_markup=main_kb()
-        )
-
-    elif data == "ref":
-        link = f"https://t.me/{(await bot.get_me()).username}?start={call.from_user.id}"
-        await call.message.edit_text(
-            f"🎁 Реферальная ссылка:\n{link}",
-            reply_markup=main_kb()
-        )
-
-    elif data == "sub":
-        exp = get_expire(call.from_user.id)
-
-        if not exp:
-            text = "❌ Подписка отсутствует"
-        elif exp < datetime.now():
-            text = "❌ Подписка истекла"
-        else:
-            text = f"✅ Активна до: {exp.strftime('%d.%m.%Y %H:%M')}"
-
-        await call.message.edit_text(text, reply_markup=main_kb())
-
-    elif data == "buy_1":
-        expire = set_expire(call.from_user.id, 1)
-
-        await call.message.edit_text(
-            f"✅ Подписка активирована\nДо: {expire.strftime('%d.%m.%Y')}",
-            reply_markup=main_kb()
-        )
+@dp.callback_query(F.data == "stars")
+async def stars_menu(call: CallbackQuery):
+    await call.message.edit_text("⭐ Оплата Stars", reply_markup=plans_kb("s"))
 
 
-# ---------------- ADMIN ----------------
-@dp.message(Command("users"))
-async def users(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-
-    cursor.execute("SELECT COUNT(*) FROM users")
-    count = cursor.fetchone()[0]
-
-    await message.answer(f"👥 Users: {count}")
+@dp.callback_query(F.data == "crypto")
+async def crypto_menu(call: CallbackQuery):
+    await call.message.edit_text("💰 Оплата Crypto", reply_markup=plans_kb("c"))
 
 
-# ---------------- SAFE CRYPTO (stub) ----------------
-async def crypto_checker():
-    """
-    SAFE LOOP (no crash)
-    """
-    while True:
-        try:
-            # сюда потом подключим CryptoBot API
-            pass
-        except Exception as e:
-            logging.warning(f"crypto loop error: {e}")
-
-        await asyncio.sleep(30)
+@dp.callback_query(F.data == "back")
+async def back(call: CallbackQuery):
+    await call.message.edit_text("Главное меню", reply_markup=main_kb())
 
 
-# ---------------- SUB CHECK ----------------
-async def sub_checker():
-    while True:
-        try:
-            now = datetime.now()
+# ---------------- STARS ---------------- #
 
-            cursor.execute("SELECT user_id, expire_date FROM users")
-            rows = cursor.fetchall()
+@dp.callback_query(F.data.startswith("s_"))
+async def pay_stars(call: CallbackQuery):
+    plan = PLANS[call.data.split("_")[1]]
 
-            for uid, exp in rows:
-                if not exp:
-                    continue
-
-                try:
-                    if datetime.fromisoformat(exp) < now:
-                        await bot.send_message(uid, "❌ Подписка истекла")
-                except:
-                    pass
-
-        except Exception as e:
-            logging.warning(f"sub checker error: {e}")
-
-        await asyncio.sleep(300)
+    await bot.send_invoice(
+        chat_id=call.message.chat.id,
+        title=f"{plan['days']} дня доступа",
+        description="Stars payment",
+        payload=f"stars_{plan['days']}",
+        provider_token="",
+        currency="XTR",
+        prices=[{"label": "Access", "amount": plan["stars"]}]
+    )
 
 
-# ---------------- STARTUP ----------------
+# ---------------- CRYPTO ---------------- #
+
+@dp.callback_query(F.data.startswith("c_"))
+async def pay_crypto(call: CallbackQuery):
+    plan = PLANS[call.data.split("_")[1]]
+
+    invoice = crypto_create_invoice(plan["crypto"], f"{plan['days']}_days")
+
+    await call.message.answer(
+        f"💰 Оплати:\n{invoice['pay_url']}"
+    )
+
+    await call.message.answer("После оплаты нажми /check")
+
+
+# ---------------- CHECK ---------------- #
+
+@dp.message(Command("check"))
+async def check(message: Message):
+    # упрощённая версия (в реале храни invoice_id в БД)
+    await message.answer("⏳ Проверка оплаты (заглушка для core v3)")
+
+
+# ---------------- INFO ---------------- #
+
+@dp.callback_query(F.data == "info")
+async def info(call: CallbackQuery):
+    await call.message.edit_text(
+        "ℹ Бот работает на aiogram v3\n"
+        "Stars + Crypto payments",
+        reply_markup=main_kb()
+    )
+
+
+# ---------------- RUN ---------------- #
+
 async def main():
-    logging.info("BOT STARTED (STABLE CORE v3)")
-
-    asyncio.create_task(sub_checker())
-    asyncio.create_task(crypto_checker())
-
     await dp.start_polling(bot)
-
 
 if __name__ == "__main__":
     asyncio.run(main())
