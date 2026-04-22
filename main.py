@@ -24,7 +24,7 @@ BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GROUP_ID = int(os.getenv("TELEGRAM_GROUP_ID", "0"))
 CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
 
-if not BOT_TOKEN or not GROUP_ID or not CRYPTO_TOKEN:
+if not BOT_TOKEN or not CRYPTO_TOKEN:
     raise RuntimeError("❌ Missing ENV variables")
 
 bot = Bot(token=BOT_TOKEN)
@@ -54,6 +54,9 @@ CREATE TABLE IF NOT EXISTS payments (
 
 conn.commit()
 
+# ================== CACHE ==================
+active_invoices = {}  # user_id -> plan
+
 # ================== PLANS ==================
 PLANS = {
     "1": {"days": 1, "stars": 550, "crypto": 5},
@@ -63,16 +66,31 @@ PLANS = {
 
 # ================== ACCESS ==================
 async def grant_access(user_id: int, days: int):
-    expire = datetime.utcnow() + timedelta(days=days)
+    cursor.execute("SELECT expire_date FROM users WHERE user_id=?", (user_id,))
+    row = cursor.fetchone()
+
+    now = datetime.utcnow()
+
+    if row and row[0]:
+        current_expire = datetime.fromisoformat(row[0])
+        if current_expire > now:
+            new_expire = current_expire + timedelta(days=days)
+        else:
+            new_expire = now + timedelta(days=days)
+    else:
+        new_expire = now + timedelta(days=days)
 
     cursor.execute(
         "INSERT OR REPLACE INTO users VALUES (?, ?)",
-        (user_id, expire.isoformat())
+        (user_id, new_expire.isoformat())
     )
     conn.commit()
 
     try:
-        await bot.send_message(user_id, f"✅ Доступ активирован на {days} дней")
+        await bot.send_message(
+            user_id,
+            f"✅ Доступ активирован до:\n{new_expire.strftime('%Y-%m-%d %H:%M')}"
+        )
     except:
         pass
 
@@ -87,7 +105,7 @@ def menu():
     ])
 
 
-def plan_kb(prefix: str):
+def plans(prefix: str):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="1 день", callback_data=f"{prefix}_1")],
         [InlineKeyboardButton(text="7 дней", callback_data=f"{prefix}_7")],
@@ -96,16 +114,28 @@ def plan_kb(prefix: str):
     ])
 
 
-def pay_kb(prefix: str, plan: str):
+def pay(prefix: str, plan: str):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💳 Оплатить", callback_data=f"pay_{prefix}_{plan}")],
         [InlineKeyboardButton(text="⬅ Назад", callback_data=prefix)]
     ])
 
 
-# ================== START ==================
+# ================== START (WITH SUB CHECK) ==================
 @router.message(CommandStart())
 async def start(message: Message):
+    cursor.execute("SELECT expire_date FROM users WHERE user_id=?", (message.from_user.id,))
+    row = cursor.fetchone()
+
+    if row and row[0]:
+        expire = datetime.fromisoformat(row[0])
+        if expire > datetime.utcnow():
+            await message.answer(
+                f"👋 У тебя активна подписка до:\n{expire.strftime('%Y-%m-%d %H:%M')}",
+                reply_markup=menu()
+            )
+            return
+
     await message.answer("👋 Выбери оплату:", reply_markup=menu())
 
 
@@ -119,13 +149,13 @@ async def back(call: CallbackQuery):
 # ================== MENUS ==================
 @router.callback_query(F.data == "stars")
 async def stars(call: CallbackQuery):
-    await call.message.edit_text("⭐ Stars тарифы", reply_markup=plan_kb("stars"))
+    await call.message.edit_text("⭐ Stars тарифы", reply_markup=plans("stars"))
     await call.answer()
 
 
 @router.callback_query(F.data == "crypto")
 async def crypto(call: CallbackQuery):
-    await call.message.edit_text("💰 Crypto тарифы", reply_markup=plan_kb("crypto"))
+    await call.message.edit_text("💰 Crypto тарифы", reply_markup=plans("crypto"))
     await call.answer()
 
 
@@ -135,7 +165,7 @@ async def stars_plan(call: CallbackQuery):
     p = call.data.split("_")[1]
     await call.message.edit_text(
         f"⭐ {p} дней — {PLANS[p]['stars']}⭐",
-        reply_markup=pay_kb("stars", p)
+        reply_markup=pay("stars", p)
     )
     await call.answer()
 
@@ -145,12 +175,12 @@ async def crypto_plan(call: CallbackQuery):
     p = call.data.split("_")[1]
     await call.message.edit_text(
         f"💰 {p} дней — {PLANS[p]['crypto']} USDT",
-        reply_markup=pay_kb("crypto", p)
+        reply_markup=pay("crypto", p)
     )
     await call.answer()
 
 
-# ================== STARS PAYMENT ==================
+# ================== STARS ==================
 @router.callback_query(F.data.startswith("pay_stars_"))
 async def pay_stars(call: CallbackQuery):
     plan = call.data.split("_")[2]
@@ -183,10 +213,17 @@ async def stars_success(message: Message):
         await grant_access(message.from_user.id, PLANS[plan]["days"])
 
 
-# ================== CRYPTO FIX ==================
+# ================== CRYPTO (ANTI DUPLICATE) ==================
 @router.callback_query(F.data.startswith("pay_crypto_"))
 async def pay_crypto(call: CallbackQuery):
     plan = call.data.split("_")[2]
+
+    # ❌ защита от дублей
+    if call.from_user.id in active_invoices:
+        await call.answer("⏳ Уже создан счёт", show_alert=True)
+        return
+
+    active_invoices[call.from_user.id] = plan
     data = PLANS[plan]
 
     url = "https://pay.crypt.bot/api/createInvoice"
@@ -202,47 +239,19 @@ async def pay_crypto(call: CallbackQuery):
     res = r.json()
 
     if not res.get("ok"):
-        await call.message.answer("❌ Ошибка создания платежа")
+        active_invoices.pop(call.from_user.id, None)
+        await call.message.answer("❌ Ошибка платежа")
         return
 
     invoice = res["result"]
-    invoice_id = invoice["invoice_id"]
-    pay_url = invoice["pay_url"]
 
     cursor.execute(
         "INSERT INTO payments VALUES (?, ?, ?, ?)",
-        (invoice_id, call.from_user.id, data["days"], "pending")
+        (invoice["invoice_id"], call.from_user.id, data["days"], "pending")
     )
     conn.commit()
 
-    await call.message.answer(
-        f"💰 Оплата создана:\n{pay_url}\n\n⏳ Ожидание подтверждения..."
-    )
-
-    # 🔁 проверка оплаты
-    for _ in range(30):  # ~3 минуты
-        check = requests.post(
-            "https://pay.crypt.bot/api/getInvoices",
-            headers=headers,
-            json={"invoice_ids": invoice_id}
-        ).json()
-
-        try:
-            status = check["result"]["items"][0]["status"]
-        except:
-            status = None
-
-        if status == "paid":
-            await grant_access(call.from_user.id, data["days"])
-            await call.message.answer("✅ Оплата подтверждена")
-            break
-
-        if status == "expired":
-            await call.message.answer("❌ Счёт истёк")
-            break
-
-        await asyncio.sleep(6)
-
+    await call.message.answer(f"💰 Оплата создана:\n{invoice['pay_url']}")
     await call.answer()
 
 
