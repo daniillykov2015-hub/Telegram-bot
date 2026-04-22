@@ -2,12 +2,11 @@ import asyncio
 import logging
 import os
 import requests
-from datetime import datetime, timedelta
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, CallbackQuery
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
+from aiogram.types import Message, CallbackQuery
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice
 
 logging.basicConfig(level=logging.INFO)
 
@@ -17,40 +16,30 @@ CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# ---------------- PAYMENTS ---------------- #
+# ---------------- ТАРИФЫ ---------------- #
 
 PLANS = {
-    "1": {"days": 1, "stars": 550, "crypto": 5},
-    "7": {"days": 7, "stars": 770, "crypto": 7},
-    "30": {"days": 30, "stars": 1100, "crypto": 10},
+    "1": {
+        "days": 1,
+        "stars": 550,
+        "crypto": 5,
+        "title": "1 день доступа"
+    },
+    "7": {
+        "days": 7,
+        "stars": 770,
+        "crypto": 7,
+        "title": "7 дней доступа"
+    },
+    "30": {
+        "days": 30,
+        "stars": 1100,
+        "crypto": 10,
+        "title": "30 дней доступа"
+    },
 }
 
-
-def crypto_create_invoice(amount, payload):
-    url = "https://pay.crypt.bot/api/createInvoice"
-    headers = {"Crypto-Pay-API-Token": CRYPTO_TOKEN}
-
-    r = requests.post(url, headers=headers, json={
-        "asset": "USDT",
-        "amount": amount,
-        "description": payload
-    })
-
-    data = r.json()
-    return data["result"]
-
-
-def crypto_check(invoice_id):
-    url = "https://pay.crypt.bot/api/getInvoices"
-    headers = {"Crypto-Pay-API-Token": CRYPTO_TOKEN}
-
-    r = requests.get(url, headers=headers, params={"invoice_ids": invoice_id})
-    data = r.json()
-
-    return data["result"]["items"][0]["status"]
-
-
-# ---------------- UI ---------------- #
+# ---------------- КНОПКИ ---------------- #
 
 def main_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -68,6 +57,19 @@ def plans_kb(prefix: str):
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
 
+# ---------------- CRYPTO ---------------- #
+
+def create_invoice(amount, payload):
+    url = "https://pay.crypt.bot/api/createInvoice"
+    headers = {"Crypto-Pay-API-Token": CRYPTO_TOKEN}
+
+    r = requests.post(url, headers=headers, json={
+        "asset": "USDT",
+        "amount": amount,
+        "description": payload
+    })
+
+    return r.json()["result"]
 
 # ---------------- START ---------------- #
 
@@ -78,16 +80,15 @@ async def start(message: Message):
         reply_markup=main_kb()
     )
 
-
 # ---------------- MENU ---------------- #
 
 @dp.callback_query(F.data == "stars")
-async def stars_menu(call: CallbackQuery):
+async def stars(call: CallbackQuery):
     await call.message.edit_text("⭐ Оплата Stars", reply_markup=plans_kb("s"))
 
 
 @dp.callback_query(F.data == "crypto")
-async def crypto_menu(call: CallbackQuery):
+async def crypto(call: CallbackQuery):
     await call.message.edit_text("💰 Оплата Crypto", reply_markup=plans_kb("c"))
 
 
@@ -104,13 +105,15 @@ async def pay_stars(call: CallbackQuery):
 
     await bot.send_invoice(
         chat_id=call.message.chat.id,
-        title=f"{plan['days']} дня доступа",
-        description="Stars payment",
+        title=plan["title"],
+        description="Доступ в закрытый канал",
         payload=f"stars_{plan['days']}",
         provider_token="",
         currency="XTR",
-        prices=[{"label": "Access", "amount": plan["stars"]}]
+        prices=[LabeledPrice(label="Доступ", amount=plan["stars"])]
     )
+
+    await call.answer()
 
 
 # ---------------- CRYPTO ---------------- #
@@ -119,21 +122,16 @@ async def pay_stars(call: CallbackQuery):
 async def pay_crypto(call: CallbackQuery):
     plan = PLANS[call.data.split("_")[1]]
 
-    invoice = crypto_create_invoice(plan["crypto"], f"{plan['days']}_days")
+    invoice = create_invoice(plan["crypto"], f"{plan['days']}_days")
 
     await call.message.answer(
-        f"💰 Оплати:\n{invoice['pay_url']}"
+        "💰 Оплата криптой\n\n"
+        f"Срок: {plan['days']} дней\n"
+        f"Сумма: {plan['crypto']} USDT\n\n"
+        f"Ссылка:\n{invoice['pay_url']}"
     )
 
-    await call.message.answer("После оплаты нажми /check")
-
-
-# ---------------- CHECK ---------------- #
-
-@dp.message(Command("check"))
-async def check(message: Message):
-    # упрощённая версия (в реале храни invoice_id в БД)
-    await message.answer("⏳ Проверка оплаты (заглушка для core v3)")
+    await call.answer()
 
 
 # ---------------- INFO ---------------- #
@@ -142,7 +140,11 @@ async def check(message: Message):
 async def info(call: CallbackQuery):
     await call.message.edit_text(
         "ℹ Бот работает на aiogram v3\n"
-        "Stars + Crypto payments",
+        "⭐ Stars + 💰 Crypto оплаты\n\n"
+        "Тарифы:\n"
+        "1д — 550⭐ / 5 USDT\n"
+        "7д — 770⭐ / 7 USDT\n"
+        "30д — 1100⭐ / 10 USDT",
         reply_markup=main_kb()
     )
 
