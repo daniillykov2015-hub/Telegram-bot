@@ -65,6 +65,14 @@ PLANS = {
 }
 
 # ================== HELPERS ==================
+async def safe_update(call: CallbackQuery, text: str | None = None, markup=None):
+    if text:
+        await call.message.edit_text(text, reply_markup=markup)
+    else:
+        await call.message.edit_reply_markup(reply_markup=markup)
+    await call.answer()
+
+
 async def is_user_in_channel(user_id: int) -> bool:
     try:
         member: ChatMember = await bot.get_chat_member(CHANNEL_ID, user_id)
@@ -122,30 +130,6 @@ async def grant_access(user_id: int, days: int):
     active_invoices.pop(user_id, None)
 
 
-# ================== AUTO REMOVE ==================
-async def remove_expired_users():
-    while True:
-        now = datetime.utcnow()
-
-        cursor.execute("SELECT user_id, expire_date FROM users")
-        rows = cursor.fetchall()
-
-        for user_id, exp in rows:
-            if not exp:
-                continue
-
-            if datetime.fromisoformat(exp) < now:
-                try:
-                    member = await bot.get_chat_member(CHANNEL_ID, user_id)
-                    if member.status in ("member", "administrator", "creator"):
-                        await bot.ban_chat_member(CHANNEL_ID, user_id)
-                        await bot.unban_chat_member(CHANNEL_ID, user_id)
-                except:
-                    pass
-
-        await asyncio.sleep(1800)
-
-
 # ================== KEYBOARDS ==================
 def menu(active=False):
     kb = [
@@ -177,7 +161,7 @@ def pay(prefix, plan):
     ])
 
 
-# ================== START (ОБНОВЛЕНО ТОЛЬКО ТУТ) ==================
+# ================== START ==================
 @router.message(CommandStart())
 async def start(message: Message):
     user_id = message.from_user.id
@@ -214,85 +198,46 @@ async def start(message: Message):
     )
 
 
-# ================== HISTORY ==================
-@router.message(Command("history"))
-async def history(message: Message):
-    cursor.execute(
-        "SELECT days, status FROM payments WHERE user_id=? ORDER BY rowid DESC LIMIT 5",
-        (message.from_user.id,)
-    )
-    rows = cursor.fetchall()
-
-    if not rows:
-        await message.answer("История пуста")
-        return
-
-    text = "🧾 История:\n\n"
-    for d, s in rows:
-        text += f"{d} дней — {s}\n"
-
-    await message.answer(text)
-
-
-# ================== ADMIN ==================
-@router.message(Command("admin"))
-async def admin(message: Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-
-    cursor.execute("SELECT COUNT(*) FROM users")
-    users = cursor.fetchone()[0]
-
-    cursor.execute("SELECT COUNT(*) FROM payments")
-    pays = cursor.fetchone()[0]
-
-    await message.answer(f"👑 Админ\n\nПользователи: {users}\nПлатежи: {pays}")
-
-
 # ================== NAVIGATION ==================
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
-    await call.message.edit_text("Меню", reply_markup=menu())
-    await call.answer()
+    await safe_update(call, "Меню", menu())
 
 
 @router.callback_query(F.data == "stars")
 async def stars(call: CallbackQuery):
-    await call.message.edit_text("⭐ Тарифы", reply_markup=plans("stars"))
-    await call.answer()
+    await safe_update(call, "⭐ Тарифы", plans("stars"))
 
 
 @router.callback_query(F.data == "crypto")
 async def crypto(call: CallbackQuery):
-    await call.message.edit_text("💰 Тарифы", reply_markup=plans("crypto"))
-    await call.answer()
+    await safe_update(call, "💰 Тарифы", plans("crypto"))
 
 
 @router.callback_query(F.data == "renew")
 async def renew(call: CallbackQuery):
-    await call.message.edit_text("🔁 Продлить:", reply_markup=plans("crypto"))
-    await call.answer()
+    await safe_update(call, "🔁 Продлить:", plans("crypto"))
 
 
 # ================== PLANS ==================
 @router.callback_query(F.data.startswith("stars_"))
 async def stars_plan(call: CallbackQuery):
     p = call.data.split("_")[1]
-    await call.message.edit_text(
+    await safe_update(
+        call,
         f"{p} дней — {PLANS[p]['stars']}⭐",
-        reply_markup=pay("stars", p)
+        pay("stars", p)
     )
-    await call.answer()
 
 
 @router.callback_query(F.data.startswith("crypto_"))
 async def crypto_plan(call: CallbackQuery):
     p = call.data.split("_")[1]
-    await call.message.edit_text(
+    await safe_update(
+        call,
         f"{p} дней — {PLANS[p]['crypto']} USDT",
-        reply_markup=pay("crypto", p)
+        pay("crypto", p)
     )
-    await call.answer()
 
 
 # ================== STARS ==================
