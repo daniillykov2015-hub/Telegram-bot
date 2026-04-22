@@ -1,27 +1,39 @@
 import asyncio
-from aiogram import Bot, Dispatcher
-from aiogram.types import Message
+import logging
+import os
+
+from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 
-TOKEN = "8703431395:AAE62kko8fS8VCwGcqnxsb7J2yUOHSxDRG4"
-ADMIN_ID = 123456789  # 6667729911
+TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+
+logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
 
 @dp.message(Command("start"))
-async def start_handler(message: Message):
-    await message.answer("Бот запущен 🚀")
+async def start(message: types.Message):
+    await message.answer("Бот запущен и работает ✅")
 
 
-@dp.message()
-async def echo(message: Message):
-    await message.answer(f"Ты написал: {message.text}")
+@dp.message(Command("id"))
+async def get_id(message: types.Message):
+    await message.answer(f"Твой ID: {message.from_user.id}")
+
+
+@dp.message(Command("admin"))
+async def admin_only(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("Нет доступа ❌")
+        return
+
+    await message.answer("Админ панель активна 🔥")
 
 
 async def main():
-    print("Бот запущен...")
     await dp.start_polling(bot)
 
 
