@@ -56,19 +56,12 @@ PLANS = {
 }
 
 # ================== KEYBOARDS ==================
-
 def main_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="⭐ Stars", callback_data="stars"),
             InlineKeyboardButton(text="💰 Crypto", callback_data="crypto"),
         ]
-    ])
-
-
-def back_to_main():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="back_main")]
     ])
 
 
@@ -88,9 +81,9 @@ def pay_menu(prefix: str, plan: str):
     ])
 
 
-def back_to_plan(prefix: str):
+def back_main_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅ Назад", callback_data=f"to_{prefix}")]
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="back_main")]
     ])
 
 # ================== START ==================
@@ -101,30 +94,12 @@ async def start(message: Message):
         reply_markup=main_menu()
     )
 
-# ================== BACK MAIN ==================
+# ================== BACK ==================
 @router.callback_query(F.data == "back_main")
 async def back_main(call: CallbackQuery):
     await call.message.edit_text(
         "👋 Главное меню:",
         reply_markup=main_menu()
-    )
-    await call.answer()
-
-# ================== RETURN TO MENU ==================
-@router.callback_query(F.data == "to_stars")
-async def to_stars(call: CallbackQuery):
-    await call.message.edit_text(
-        "⭐ Stars тарифы:",
-        reply_markup=plans_menu("stars")
-    )
-    await call.answer()
-
-
-@router.callback_query(F.data == "to_crypto")
-async def to_crypto(call: CallbackQuery):
-    await call.message.edit_text(
-        "💰 Crypto тарифы:",
-        reply_markup=plans_menu("crypto")
     )
     await call.answer()
 
@@ -170,11 +145,14 @@ async def crypto_plan(call: CallbackQuery):
     )
     await call.answer()
 
-# ================== STARS PAYMENT ==================
+# ================== STARS PAYMENT (FIXED) ==================
 @router.callback_query(F.data.startswith("pay_stars_"))
 async def pay_stars(call: CallbackQuery):
     plan = call.data.split("_")[2]
     data = PLANS[plan]
+
+    # ❗ ВАЖНО: убираем старое меню (фикс UX)
+    await call.message.delete()
 
     await bot.send_invoice(
         chat_id=call.message.chat.id,
@@ -187,13 +165,13 @@ async def pay_stars(call: CallbackQuery):
     )
 
     await call.message.answer(
-        "💳 Окно оплаты открыто",
-        reply_markup=back_to_plan("stars")
+        "💳 Окно оплаты Stars открыто.\nЕсли нужно вернуться:",
+        reply_markup=back_main_kb()
     )
 
     await call.answer()
 
-# ================== CRYPTO PAYMENT ==================
+# ================== CRYPTO ==================
 def create_invoice(amount, payload):
     url = "https://pay.crypt.bot/api/createInvoice"
     headers = {"Crypto-Pay-API-Token": CRYPTO_TOKEN}
@@ -220,9 +198,11 @@ async def pay_crypto(call: CallbackQuery):
     )
     conn.commit()
 
+    await call.message.delete()
+
     await call.message.answer(
         f"💰 Оплата:\n{invoice['pay_url']}",
-        reply_markup=back_to_plan("crypto")
+        reply_markup=back_main_kb()
     )
 
     await call.answer()
