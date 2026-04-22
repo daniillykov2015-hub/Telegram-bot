@@ -228,7 +228,7 @@ if not has_required_config():
     asyncio.run(wait_for_configuration())
 
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher(bot)
+dp = Dispatcher()
 
 
 def get_plan_keyboard() -> InlineKeyboardMarkup:
