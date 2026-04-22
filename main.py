@@ -100,10 +100,11 @@ async def swap(call: CallbackQuery, markup):
         pass
     await call.answer()
 
-# ================== BACK ==================
+# ================== BACK (ФИКС) ==================
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
-    await swap(call, menu())
+    await call.message.edit_text(MAIN_TEXT, reply_markup=menu())
+    await call.answer()
 
 # ================== MENU ==================
 @router.callback_query(F.data == "stars")
@@ -127,7 +128,7 @@ async def crypto_plan(call: CallbackQuery):
     plan = call.data.split(":")[1]
     await swap(call, pay_kb("crypto", plan))
 
-# ================== REF SYSTEM (ИСПРАВЛЕНО) ==================
+# ================== REF SYSTEM (ИСПРАВЛЕНО ПОЛНОСТЬЮ) ==================
 @router.callback_query(F.data == "ref")
 async def ref(call: CallbackQuery):
     user_id = call.from_user.id
@@ -144,19 +145,19 @@ async def ref(call: CallbackQuery):
         "👥 РЕФЕРАЛЬНАЯ СИСТЕМА\n\n"
         "💡 Как получить +7 дней:\n\n"
         "1️⃣ У тебя должна быть подписка\n"
-        "2️⃣ Отправь ссылку другу\n"
-        "3️⃣ Друг оформляет доступ\n"
+        "2️⃣ Пригласи друга по ссылке\n"
+        "3️⃣ Он оформляет доступ\n"
         "4️⃣ Ты получаешь +7 дней\n\n"
-        f"🔗 Ссылка:\n{link}\n\n"
-        f"👤 Приглашено: {count}\n\n"
-        "⬅ Вернись назад кнопкой ниже"
+        f"🔗 Твоя ссылка:\n{link}\n\n"
+        f"👤 Приглашено: {count}"
     )
 
-    # ❗ ВСЕГДА единый UX: кнопка назад как везде
-    await swap(call, back_kb())
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
+    ])
 
-    # текст отдельным сообщением (не ломает интерфейс)
-    await call.message.answer(text)
+    await call.message.edit_text(text, reply_markup=kb)
+    await call.answer()
 
 # ================== REF LOGIC ==================
 @router.message(CommandStart(deep_link=True))
@@ -202,7 +203,7 @@ async def referral_start(message: Message):
         conn.commit()
 
         try:
-            await bot.send_message(ref_id, "🎉 +7 дней за приглашение начислено!")
+            await bot.send_message(ref_id, "🎉 +7 дней за друга начислено!")
         except:
             pass
 
