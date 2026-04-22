@@ -69,9 +69,15 @@ def menu():
     ])
 
 
-def back_kb():
+def back_main():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
+    ])
+
+
+def back_info():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="info")]
     ])
 
 # ================== START ==================
@@ -85,17 +91,13 @@ async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=menu())
     await call.answer()
 
-# ================== REF SYSTEM ==================
+# ================== REF ==================
 @router.callback_query(F.data == "ref")
 async def ref(call: CallbackQuery):
     user_id = call.from_user.id
-
     link = f"https://t.me/{(await bot.get_me()).username}?start={user_id}"
 
-    cursor.execute(
-        "SELECT COUNT(*) FROM referrals WHERE user_id=?",
-        (user_id,)
-    )
+    cursor.execute("SELECT COUNT(*) FROM referrals WHERE user_id=?", (user_id,))
     count = cursor.fetchone()[0]
 
     text = (
@@ -109,16 +111,13 @@ async def ref(call: CallbackQuery):
         f"👤 Приглашено: {count}"
     )
 
-    await call.message.edit_text(text, reply_markup=back_kb())
+    await call.message.edit_text(text, reply_markup=back_main())
     await call.answer()
 
 # ================== INFO MENU ==================
 @router.callback_query(F.data == "info")
 async def info(call: CallbackQuery):
-    text = (
-        "ℹ️ ИНФОРМАЦИЯ\n\n"
-        "Выбери раздел 👇"
-    )
+    text = "ℹ️ ИНФОРМАЦИЯ\n\nВыбери раздел 👇"
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛠 Поддержка", callback_data="support")],
@@ -135,39 +134,50 @@ async def info(call: CallbackQuery):
 async def support(call: CallbackQuery):
     text = (
         "🛠 ПОДДЕРЖКА\n\n"
-        "Связь с админом:\n"
         "👉 https://t.me/mistybibi"
     )
 
-    await call.message.edit_text(text, reply_markup=back_kb())
+    await call.message.edit_text(text, reply_markup=back_info())
     await call.answer()
 
-# ================== PRIVACY POLICY ==================
+# ================== PRIVACY ==================
 @router.callback_query(F.data == "privacy")
 async def privacy(call: CallbackQuery):
-    text = (
-        "📄 ПОЛИТИКА КОНФИДЕНЦИАЛЬНОСТИ\n\n"
-        "Данные используются только для работы сервиса.\n"
-        "Передача третьим лицам — только по закону.\n\n"
-        "Пользователь принимает риски передачи данных.\n"
-        "Администрация может менять политику без уведомления.\n"
-    )
+    text = """Политика конфиденциальности
+Platega • 1 апреля в 20:29
 
-    await call.message.edit_text(text, reply_markup=back_kb())
+Данная Политика конфиденциальности регламентирует сбор идентификаторов аккаунта, технической информации и истории взаимодействий для обеспечения работы сервиса, связи с пользователем и аналитики. Передача данных третьим лицам допускается только по закону, для выполнения обязательств или с согласия пользователя.
+Администрация хранит информацию необходимый срок, применяет разумные меры защиты, но не гарантирует абсолютной безопасности. Пользователь自行承担 риски передачи данных и принимает любые изменения в политике, продолжая использовать сервис.
+
+1. Общие положения
+2. Сбор информации
+3. Использование информации
+4. Передача информации
+5. Хранение и защита
+6. Отказ от ответственности
+7. Изменения"""
+
+    await call.message.edit_text(text, reply_markup=back_info())
     await call.answer()
 
 # ================== TERMS ==================
 @router.callback_query(F.data == "terms")
 async def terms(call: CallbackQuery):
-    text = (
-        "📜 ПОЛЬЗОВАТЕЛЬСКОЕ СОГЛАШЕНИЕ\n\n"
-        "Сервис предоставляется как есть.\n"
-        "Возвраты не предусмотрены.\n"
-        "Администрация не гарантирует результат.\n\n"
-        "Используя сервис — вы соглашаетесь с условиями."
-    )
+    text = """Пользовательское соглашение
+Platega • 1 апреля в 20:30
 
-    await call.message.edit_text(text, reply_markup=back_kb())
+1. Общие положения
+2. Характер услуг
+3. Отказ от гарантий
+4. Законность использования
+5. Интеллектуальная собственность
+6. Ограничение доступа
+7. Платежи и возвраты
+8. Конфиденциальность
+9. Изменения условий
+10. Контакты"""
+
+    await call.message.edit_text(text, reply_markup=back_info())
     await call.answer()
 
 # ================== RUN ==================
