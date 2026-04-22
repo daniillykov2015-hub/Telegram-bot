@@ -3,8 +3,8 @@ from aiogram import Bot, Dispatcher
 from aiogram.types import Message
 from aiogram.filters import Command
 
-TOKEN = "ТВОЙ_ТОКЕН"
-ADMIN_ID = 123456789  # сюда вставь свой ID
+TOKEN = "8703431395:AAE62kko8fS8VCwGcqnxsb7J2yUOHSxDRG4"
+ADMIN_ID = 123456789  # 6667729911
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
