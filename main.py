@@ -64,7 +64,7 @@ PLANS = {
     "30": {"days": 30, "stars": 1100, "crypto": 10},
 }
 
-# ================== HELPERS ==================
+# ================== SAFE UI ==================
 async def safe_update(call: CallbackQuery, text: str | None = None, markup=None):
     if text:
         await call.message.edit_text(text, reply_markup=markup)
@@ -72,7 +72,7 @@ async def safe_update(call: CallbackQuery, text: str | None = None, markup=None)
         await call.message.edit_reply_markup(reply_markup=markup)
     await call.answer()
 
-
+# ================== HELPERS ==================
 async def is_user_in_channel(user_id: int) -> bool:
     try:
         member: ChatMember = await bot.get_chat_member(CHANNEL_ID, user_id)
@@ -111,16 +111,10 @@ async def grant_access(user_id: int, days: int):
     conn.commit()
 
     if await is_user_in_channel(user_id):
-        text = (
-            f"✅ Подписка продлена до:\n{new_expire.strftime('%Y-%m-%d %H:%M')}\n\n"
-            f"Ты уже в канале 👍"
-        )
+        text = f"✅ Подписка продлена до:\n{new_expire.strftime('%Y-%m-%d %H:%M')}\n\nТы уже в канале 👍"
     else:
         link = await create_secure_invite()
-        text = (
-            f"✅ Доступ до:\n{new_expire.strftime('%Y-%m-%d %H:%M')}\n\n"
-            f"👉 Вход (10 минут):\n{link}"
-        )
+        text = f"✅ Доступ до:\n{new_expire.strftime('%Y-%m-%d %H:%M')}\n\n👉 Вход (10 минут):\n{link}"
 
     try:
         await bot.send_message(user_id, text)
@@ -128,6 +122,35 @@ async def grant_access(user_id: int, days: int):
         pass
 
     active_invoices.pop(user_id, None)
+
+
+# ================== AUTO CLEAN ==================
+async def remove_expired_users():
+    while True:
+        try:
+            now = datetime.utcnow()
+
+            cursor.execute("SELECT user_id, expire_date FROM users")
+            rows = cursor.fetchall()
+
+            for user_id, exp in rows:
+                if not exp:
+                    continue
+
+                if datetime.fromisoformat(exp) < now:
+                    try:
+                        member = await bot.get_chat_member(CHANNEL_ID, user_id)
+                        if member.status in ("member", "administrator", "creator"):
+                            await bot.ban_chat_member(CHANNEL_ID, user_id)
+                            await bot.unban_chat_member(CHANNEL_ID, user_id)
+                    except:
+                        pass
+
+            await asyncio.sleep(1800)
+
+        except Exception as e:
+            logging.error(f"remove_expired_users error: {e}")
+            await asyncio.sleep(60)
 
 
 # ================== KEYBOARDS ==================
@@ -164,41 +187,19 @@ def pay(prefix, plan):
 # ================== START ==================
 @router.message(CommandStart())
 async def start(message: Message):
-    user_id = message.from_user.id
-
-    cursor.execute("SELECT expire_date FROM users WHERE user_id=?", (user_id,))
-    row = cursor.fetchone()
-
-    if row and row[0]:
-        expire = datetime.fromisoformat(row[0])
-
-        if expire > datetime.utcnow():
-            if await is_user_in_channel(user_id):
-                await message.answer(
-                    f"👋 Подписка активна до:\n{expire.strftime('%Y-%m-%d %H:%M')}\n\nТы уже в канале 👍",
-                    reply_markup=menu(active=True)
-                )
-            else:
-                link = await create_secure_invite()
-                await message.answer(
-                    f"👋 Подписка активна до:\n{expire.strftime('%Y-%m-%d %H:%M')}\n\n"
-                    f"👉 Войти (10 минут):\n{link}",
-                    reply_markup=menu(active=True)
-                )
-            return
-
-    await message.answer(
+    text = (
         "👋 Привет, я Ева и это мой закрытый канал\n\n"
         "❓ Что внутри?\n\n"
         "Закрытый контент по подписке\n\n"
         "💎 Без ограничений\n"
         "🔥 Обновления регулярно\n\n"
-        "Выбери способ оплаты 👇",
-        reply_markup=menu()
+        "Выбери способ оплаты 👇"
     )
 
+    await message.answer(text, reply_markup=menu())
 
-# ================== NAVIGATION ==================
+
+# ================== NAV ==================
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
     await safe_update(call, "Меню", menu())
@@ -223,81 +224,13 @@ async def renew(call: CallbackQuery):
 @router.callback_query(F.data.startswith("stars_"))
 async def stars_plan(call: CallbackQuery):
     p = call.data.split("_")[1]
-    await safe_update(
-        call,
-        f"{p} дней — {PLANS[p]['stars']}⭐",
-        pay("stars", p)
-    )
+    await safe_update(call, f"{p} дней — {PLANS[p]['stars']}⭐", pay("stars", p))
 
 
 @router.callback_query(F.data.startswith("crypto_"))
 async def crypto_plan(call: CallbackQuery):
     p = call.data.split("_")[1]
-    await safe_update(
-        call,
-        f"{p} дней — {PLANS[p]['crypto']} USDT",
-        pay("crypto", p)
-    )
-
-
-# ================== STARS ==================
-@router.callback_query(F.data.startswith("pay_stars_"))
-async def pay_stars(call: CallbackQuery):
-    plan = call.data.split("_")[2]
-    data = PLANS[plan]
-
-    await bot.send_invoice(
-        chat_id=call.message.chat.id,
-        title="Access",
-        description="Stars",
-        payload=f"stars_{plan}",
-        provider_token="",
-        currency="XTR",
-        prices=[LabeledPrice(label="Access", amount=data["stars"])]
-    )
-
-    await call.answer()
-
-
-@router.pre_checkout_query()
-async def pre_checkout(pre: PreCheckoutQuery):
-    await pre.answer(ok=True)
-
-
-@router.message(F.successful_payment)
-async def stars_success(message: Message):
-    plan = message.successful_payment.invoice_payload.split("_")[1]
-    await grant_access(message.from_user.id, PLANS[plan]["days"])
-
-
-# ================== CRYPTO ==================
-@router.callback_query(F.data.startswith("pay_crypto_"))
-async def pay_crypto(call: CallbackQuery):
-    plan = call.data.split("_")[2]
-
-    if call.from_user.id in active_invoices:
-        await call.answer("⏳ Уже есть счёт", show_alert=True)
-        return
-
-    active_invoices[call.from_user.id] = plan
-    data = PLANS[plan]
-
-    r = requests.post(
-        "https://pay.crypt.bot/api/createInvoice",
-        headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
-        json={"asset": "USDT", "amount": data["crypto"]}
-    ).json()
-
-    invoice = r["result"]
-
-    cursor.execute(
-        "INSERT INTO payments VALUES (?, ?, ?, ?)",
-        (invoice["invoice_id"], call.from_user.id, data["days"], "pending")
-    )
-    conn.commit()
-
-    await call.message.answer(f"💰 Оплата:\n{invoice['pay_url']}")
-    await call.answer()
+    await safe_update(call, f"{p} дней — {PLANS[p]['crypto']} USDT", pay("crypto", p))
 
 
 # ================== RUN ==================
