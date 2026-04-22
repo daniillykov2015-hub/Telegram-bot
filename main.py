@@ -21,6 +21,7 @@ log = logging.getLogger("bot")
 # ================= ENV =================
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
+GROUP_ID = os.getenv("TELEGRAM_GROUP_ID")
 
 if not TOKEN:
     raise RuntimeError("TELEGRAM_BOT_TOKEN не задан")
@@ -53,6 +54,7 @@ conn.commit()
 STARS_PRICES = {1: 550, 7: 770, 30: 1100}
 CRYPTO_PRICES = {1: 6.5, 7: 9, 30: 13}
 
+
 # ================= UI =================
 def main_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -68,16 +70,19 @@ def back_btn():
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
 
+
 # ================= START =================
 @dp.message(Command("start"))
 async def start(m: Message):
     await m.answer("Выбери оплату:", reply_markup=main_menu())
+
 
 # ================= BACK =================
 @dp.callback_query(F.data == "back")
 async def back(c: CallbackQuery):
     await c.message.edit_text("Главное меню:", reply_markup=main_menu())
     await c.answer()
+
 
 # ================= STARS =================
 @dp.callback_query(F.data == "stars")
@@ -88,7 +93,6 @@ async def stars_menu(c: CallbackQuery):
         [InlineKeyboardButton(text="30 дней", callback_data="s_30")],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
-
     await c.message.edit_text("⭐ Stars оплата:", reply_markup=kb)
     await c.answer()
 
@@ -108,62 +112,35 @@ async def buy_stars(c: CallbackQuery):
         prices=[LabeledPrice(label="Access", amount=price)],
         start_parameter="stars"
     )
-
     await c.answer()
 
-# ================= SUCCESS STARS =================
-@dp.message(F.successful_payment)
-async def success(m: Message):
-    payload = m.successful_payment.invoice_payload
 
-    if not payload.startswith("stars_"):
-        return
-
-    days = int(payload.split("_")[1])
-    expire = datetime.now() + timedelta(days=days)
-
-    cur.execute(
-        "INSERT OR REPLACE INTO users VALUES (?, ?)",
-        (m.from_user.id, expire.isoformat())
-    )
-    conn.commit()
-
-    await m.answer(f"✅ Stars оплата прошла\nДоступ до {expire.date()}")
-
-# ================= CRYPTO FIXED =================
+# ================= CRYPTO =================
 async def create_invoice(amount, days):
     if not CRYPTO_TOKEN:
-        raise Exception("CRYPTO_TOKEN not set")
+        raise Exception("CRYPTO_TOKEN не задан")
 
     url = "https://pay.crypt.bot/api/createInvoice"
     headers = {"Crypto-Pay-API-Token": CRYPTO_TOKEN}
 
-    payload = {
-        "asset": "USDT",
-        "amount": amount,
-        "description": f"{days} days"
-    }
-
     async with aiohttp.ClientSession() as session:
-        try:
-            async with session.post(url, json=payload, headers=headers, timeout=15) as r:
-                data = await r.json()
-        except Exception as e:
-            raise Exception(f"network_error: {e}")
-
-    if not isinstance(data, dict):
-        raise Exception("bad_response")
+        async with session.post(url, json={
+            "asset": "USDT",
+            "amount": amount,
+            "description": f"{days} days"
+        }, headers=headers) as r:
+            data = await r.json()
 
     if not data.get("ok"):
-        raise Exception(f"crypto_error: {data.get('error')}")
+        raise Exception(data)
 
     result = data.get("result")
     if not result:
-        raise Exception("no_result")
+        raise Exception("no result from crypto API")
 
     return result
 
-# ================= CRYPTO MENU =================
+
 @dp.callback_query(F.data == "crypto")
 async def crypto_menu(c: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -172,11 +149,10 @@ async def crypto_menu(c: CallbackQuery):
         [InlineKeyboardButton(text="30 дней", callback_data="c_30")],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
-
     await c.message.edit_text("💰 Crypto оплата:", reply_markup=kb)
     await c.answer()
 
-# ================= CRYPTO PAY =================
+
 @dp.callback_query(F.data.startswith("c_"))
 async def crypto_pay(c: CallbackQuery):
     days = int(c.data.split("_")[1])
@@ -184,22 +160,16 @@ async def crypto_pay(c: CallbackQuery):
 
     try:
         inv = await create_invoice(amount, days)
-        invoice_id = inv["invoice_id"]
-        pay_url = inv["pay_url"]
-
     except Exception as e:
-        log.warning(f"crypto failed: {e}")
+        log.error(e)
+        await c.message.answer("❌ Crypto временно недоступен\nМожно оплатить через Stars ⭐")
+        return
 
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⭐ Stars оплата", callback_data=f"s_{days}")],
-            [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
-        ])
+    invoice_id = inv.get("invoice_id")
+    pay_url = inv.get("pay_url")
 
-        await c.message.answer(
-            "❌ Крипта временно недоступна\n\n"
-            "Можно оплатить через Stars.",
-            reply_markup=kb
-        )
+    if not invoice_id or not pay_url:
+        await c.message.answer("Ошибка создания счёта")
         return
 
     cur.execute(
@@ -215,7 +185,7 @@ async def crypto_pay(c: CallbackQuery):
     await c.message.answer(pay_url, reply_markup=kb)
     await c.answer()
 
-# ================= CHECK =================
+
 async def check_invoice(invoice_id: str):
     if not CRYPTO_TOKEN:
         return None
@@ -224,14 +194,8 @@ async def check_invoice(invoice_id: str):
     headers = {"Crypto-Pay-API-Token": CRYPTO_TOKEN}
 
     async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(url, params={"invoice_ids": invoice_id}, headers=headers, timeout=15) as r:
-                data = await r.json()
-        except:
-            return None
-
-    if not data.get("ok"):
-        return None
+        async with session.get(url, params={"invoice_ids": invoice_id}, headers=headers) as r:
+            data = await r.json()
 
     items = data.get("result", {}).get("items", [])
     if not items:
@@ -239,7 +203,7 @@ async def check_invoice(invoice_id: str):
 
     return items[0].get("status")
 
-# ================= CHECK BUTTON =================
+
 @dp.callback_query(F.data.startswith("check_"))
 async def check(c: CallbackQuery):
     invoice_id = c.data.split("_")[1]
@@ -247,29 +211,23 @@ async def check(c: CallbackQuery):
     status = await check_invoice(invoice_id)
 
     if status != "paid":
-        await c.message.answer("⏳ Оплата не найдена")
+        await c.message.answer("⏳ Не оплачено")
         return
 
-    row = cur.execute(
-        "SELECT user_id, days FROM payments WHERE invoice_id=?",
-        (invoice_id,)
-    ).fetchone()
+    cur.execute("SELECT user_id, days FROM payments WHERE invoice_id=?", (invoice_id,))
+    row = cur.fetchone()
 
     if not row:
-        await c.message.answer("❌ Платёж не найден")
         return
 
     user_id, days = row
-
     expire = datetime.now() + timedelta(days=days)
 
-    cur.execute(
-        "INSERT OR REPLACE INTO users VALUES (?, ?)",
-        (user_id, expire.isoformat())
-    )
+    cur.execute("INSERT OR REPLACE INTO users VALUES (?, ?)", (user_id, expire.isoformat()))
     conn.commit()
 
     await c.message.answer(f"✅ Доступ до {expire.date()}")
+
 
 # ================= REF =================
 @dp.callback_query(F.data == "ref")
@@ -277,16 +235,25 @@ async def ref(c: CallbackQuery):
     bot_info = await bot.get_me()
     link = f"https://t.me/{bot_info.username}?start={c.from_user.id}"
 
-    await c.message.edit_text(f"🎁 Рефералка:\n{link}", reply_markup=back_btn())
+    await c.message.edit_text(
+        f"🎁 Рефералка:\n{link}",
+        reply_markup=back_btn()
+    )
+
 
 # ================= INFO =================
 @dp.callback_query(F.data == "info")
 async def info(c: CallbackQuery):
-    await c.message.edit_text("ℹ Бот с оплатой Stars и Crypto.", reply_markup=back_btn())
+    await c.message.edit_text(
+        "ℹ Бот подписки с оплатой Stars и Crypto.",
+        reply_markup=back_btn()
+    )
+
 
 # ================= RUN =================
 async def main():
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
