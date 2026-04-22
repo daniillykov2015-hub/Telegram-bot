@@ -5,22 +5,24 @@ import sqlite3
 from datetime import datetime, timedelta
 
 import requests
-from aiogram import Bot, Dispatcher, Router, types, F
+from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import CommandStart
 from aiogram.types import (
+    Message,
+    CallbackQuery,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
-    LabeledPrice,
+    LabeledPrice
 )
 
 # ================== CONFIG ==================
 logging.basicConfig(level=logging.INFO)
 
-API_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-GROUP_ID = os.getenv("TELEGRAM_GROUP_ID")
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+GROUP_ID = int(os.getenv("TELEGRAM_GROUP_ID"))
 CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
 
-bot = Bot(token=API_TOKEN)
+bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 router = Router()
 dp.include_router(router)
@@ -64,152 +66,145 @@ def main_menu():
     ])
 
 
-def back_menu():
+def back_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
 
 
-def plan_menu(prefix: str):
+def plan_kb(prefix: str):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton("1 день", callback_data=f"{prefix}_1")],
-        [InlineKeyboardButton("7 дней", callback_data=f"{prefix}_7")],
-        [InlineKeyboardButton("30 дней", callback_data=f"{prefix}_30")],
-        [InlineKeyboardButton("⬅ Назад", callback_data="back")]
+        [InlineKeyboardButton(text="1 день", callback_data=f"{prefix}_1")],
+        [InlineKeyboardButton(text="7 дней", callback_data=f"{prefix}_7")],
+        [InlineKeyboardButton(text="30 дней", callback_data=f"{prefix}_30")],
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
 
 
-def pay_menu(prefix: str, plan: str):
+def pay_kb(prefix: str, plan: str):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton("💳 Оплатить", callback_data=f"pay_{prefix}_{plan}")],
-        [InlineKeyboardButton("⬅ Назад", callback_data=f"{prefix}")]
+        [InlineKeyboardButton(text="💳 Оплатить", callback_data=f"pay_{prefix}_{plan}")],
+        [InlineKeyboardButton(text="⬅ Назад", callback_data=prefix)]
     ])
 
 
 # ================== START ==================
 @router.message(CommandStart())
-async def start(message: types.Message):
+async def start(message: Message):
     await message.answer(
-        "Добро пожаловать 👋\nВыбери оплату:",
+        "👋 Добро пожаловать!\nВыбери способ оплаты:",
         reply_markup=main_menu()
     )
 
 
-# ================== MENU ==================
+# ================== BACK ==================
 @router.callback_query(F.data == "back")
-async def back(call: types.CallbackQuery):
-    await call.message.edit_text("Главное меню:", reply_markup=main_menu())
+async def back(call: CallbackQuery):
+    await call.message.edit_text(
+        "Главное меню:",
+        reply_markup=main_menu()
+    )
     await call.answer()
 
 
+# ================== MENUS ==================
 @router.callback_query(F.data == "stars")
-async def stars(call: types.CallbackQuery):
+async def stars(call: CallbackQuery):
     await call.message.edit_text(
         "⭐ Выбери тариф Stars:",
-        reply_markup=plan_menu("stars")
+        reply_markup=plan_kb("stars")
     )
     await call.answer()
 
 
 @router.callback_query(F.data == "crypto")
-async def crypto(call: types.CallbackQuery):
+async def crypto(call: CallbackQuery):
     await call.message.edit_text(
         "💰 Выбери тариф Crypto:",
-        reply_markup=plan_menu("crypto")
+        reply_markup=plan_kb("crypto")
     )
     await call.answer()
 
 
 # ================== PLAN SCREENS ==================
 @router.callback_query(F.data.startswith("stars_"))
-async def stars_plan(call: types.CallbackQuery):
+async def stars_plan(call: CallbackQuery):
     plan = call.data.split("_")[1]
 
     await call.message.edit_text(
-        f"⭐ Тариф {plan} дней\nЦена: {PLANS[plan]['stars']}⭐",
-        reply_markup=pay_menu("stars", plan)
+        f"⭐ {plan} дней\nЦена: {PLANS[plan]['stars']}⭐",
+        reply_markup=pay_kb("stars", plan)
     )
     await call.answer()
 
 
 @router.callback_query(F.data.startswith("crypto_"))
-async def crypto_plan(call: types.CallbackQuery):
+async def crypto_plan(call: CallbackQuery):
     plan = call.data.split("_")[1]
 
     await call.message.edit_text(
-        f"💰 Тариф {plan} дней\nЦена: {PLANS[plan]['crypto']} USDT",
-        reply_markup=pay_menu("crypto", plan)
+        f"💰 {plan} дней\nЦена: {PLANS[plan]['crypto']} USDT",
+        reply_markup=pay_kb("crypto", plan)
     )
     await call.answer()
 
 
-# ================== PAYMENT (STARS) ==================
+# ================== STARS PAYMENT ==================
 @router.callback_query(F.data.startswith("pay_stars_"))
-async def pay_stars(call: types.CallbackQuery):
+async def pay_stars(call: CallbackQuery):
     plan = call.data.split("_")[2]
     data = PLANS[plan]
 
     await bot.send_invoice(
         chat_id=call.message.chat.id,
         title=f"{data['days']} дней доступа",
-        description="Оплата Stars",
+        description="Stars оплата",
         payload=f"stars_{plan}",
         provider_token="",
         currency="XTR",
-        prices=[LabeledPrice(label="Access", amount=data["stars"])],
+        prices=[LabeledPrice(label="Access", amount=data["stars"])]
     )
 
     await call.message.answer(
-        "🟡 Окно оплаты открыто.\nЕсли передумал — жми назад 👇",
-        reply_markup=back_menu()
+        "💳 Окно оплаты открыто.\nЕсли нужно — вернись назад 👇",
+        reply_markup=back_kb()
     )
 
     await call.answer()
 
 
-# ================== PAYMENT (CRYPTO) ==================
+# ================== CRYPTO ==================
 def create_invoice(amount, payload):
     url = "https://pay.crypt.bot/api/createInvoice"
     headers = {"Crypto-Pay-API-Token": CRYPTO_TOKEN}
-    data = {
+
+    r = requests.post(url, headers=headers, json={
         "asset": "USDT",
         "amount": amount,
         "description": payload
-    }
+    })
 
-    r = requests.post(url, headers=headers, json=data)
     return r.json()["result"]
 
 
 @router.callback_query(F.data.startswith("pay_crypto_"))
-async def pay_crypto(call: types.CallbackQuery):
+async def pay_crypto(call: CallbackQuery):
     plan = call.data.split("_")[2]
     data = PLANS[plan]
 
     invoice = create_invoice(data["crypto"], f"{plan}_days")
 
-    pay_url = invoice["pay_url"]
-    invoice_id = invoice["invoice_id"]
-
     cursor.execute(
         "INSERT INTO payments VALUES (?, ?, ?, ?)",
-        (invoice_id, call.from_user.id, data["days"], "pending")
+        (invoice["invoice_id"], call.from_user.id, data["days"], "pending")
     )
     conn.commit()
 
     await call.message.answer(
-        f"💰 Оплати по ссылке:\n{pay_url}",
-        reply_markup=back_menu()
+        f"💰 Оплата:\n{invoice['pay_url']}",
+        reply_markup=back_kb()
     )
 
-    await call.answer()
-
-
-# ================== BACK BUTTON FROM PAY SCREEN ==================
-@router.callback_query(F.data == "back")
-async def back(call: types.CallbackQuery):
-    await call.message.delete()
-    await call.message.answer("Главное меню:", reply_markup=main_menu())
     await call.answer()
 
 
