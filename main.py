@@ -6,12 +6,15 @@ from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-# Настройка логирования
+# Настройка логирования для Railway
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Загрузка токена (убедитесь, что переменная задана в Railway)
+# Токен из переменных окружения
 API_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
+if not API_TOKEN:
+    logger.error("ОШИБКА: TELEGRAM_BOT_TOKEN не найден!")
 
 # Инициализация бота и диспетчера (в 3.x бот не передается в Dispatcher)
 bot = Bot(token=API_TOKEN)
@@ -28,9 +31,9 @@ def get_start_kb():
 
 def get_payment_kb():
     builder = InlineKeyboardBuilder()
-    # Текст кнопки изменен, чтобы избежать совпадения при редактировании
-    builder.row(InlineKeyboardButton(text="Выбрать тариф — 500 ⭐", callback_data="buy_1m"))
-    builder.row(InlineKeyboardButton(text="Назад", callback_data="back_to_main"))
+    # Текст изменен, чтобы избежать совпадения при редактировании сообщения
+    builder.row(InlineKeyboardButton(text="Купить за 500 ⭐", callback_data="buy_1m"))
+    builder.row(InlineKeyboardButton(text="« Назад", callback_data="back_to_main"))
     return builder.as_markup()
 
 # --- Обработчики ---
@@ -45,20 +48,20 @@ async def start_handler(message: types.Message):
 @dp.callback_query(F.data == "stars_menu")
 async def stars_menu_handler(call: types.CallbackQuery):
     try:
-        # Изменяем текст, чтобы избежать TelegramBadRequest (message is not modified)
+        # Текст обязательно должен отличаться от предыдущего (IMG_4631.jpg)
         await call.message.edit_text(
-            "💎 Оплата через Telegram Stars. Выберите доступный вариант:",
+            "💎 Оплата через Telegram Stars.\nВыберите тариф:",
             reply_markup=get_payment_kb()
         )
     except Exception as e:
-        logger.warning(f"Ошибка при редактировании: {e}")
+        logger.warning(f"Ошибка редактирования: {e}")
         await call.answer()
 
 @dp.callback_query(F.data == "back_to_main")
 async def back_handler(call: types.CallbackQuery):
     try:
         await call.message.edit_text(
-            "🔒 Главное меню. Выберите действие:",
+            "🔒 Главное меню.\nВыберите действие:",
             reply_markup=get_start_kb()
         )
     except Exception:
@@ -67,11 +70,14 @@ async def back_handler(call: types.CallbackQuery):
 # --- Запуск ---
 
 async def main():
-    logger.info("Запуск бота...")
-    # drop_pending_updates=True решает проблему ConflictError при перезапусках
+    logger.info("Запуск: удаление вебхуков и старых обновлений...")
+    # Эта команда решает проблему TelegramConflictError (IMG_4632.jpg, IMG_4633.jpg)
     await bot.delete_webhook(drop_pending_updates=True)
+    
     try:
         await dp.start_polling(bot)
+    except Exception as e:
+        logger.error(f"Критическая ошибка: {e}")
     finally:
         await bot.session.close()
 
@@ -79,4 +85,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        logger.info("Бот остановлен")
+        logger.info("Бот остановлен вручную.")
