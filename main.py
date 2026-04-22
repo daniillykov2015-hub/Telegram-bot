@@ -80,7 +80,7 @@ async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=menu())
     await call.answer()
 
-# ================== STARS MENU ==================
+# ================== STARS ==================
 @router.callback_query(F.data == "stars")
 async def stars(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -93,7 +93,7 @@ async def stars(call: CallbackQuery):
     await call.message.edit_text("⭐ Stars тарифы", reply_markup=kb)
     await call.answer()
 
-# ================== CRYPTO MENU ==================
+# ================== CRYPTO ==================
 @router.callback_query(F.data == "crypto")
 async def crypto(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -106,7 +106,7 @@ async def crypto(call: CallbackQuery):
     await call.message.edit_text("💰 Crypto тарифы", reply_markup=kb)
     await call.answer()
 
-# ================== STARS PAYMENT (FIXED) ==================
+# ================== STARS PAY ==================
 @router.callback_query(F.data.startswith("stars:"))
 async def stars_pay(call: CallbackQuery):
     plan = call.data.split(":")[1]
@@ -131,22 +131,19 @@ async def pre_checkout(pre: PreCheckoutQuery):
 # ================== SUCCESS ==================
 @router.message(F.successful_payment)
 async def success(message: Message):
-    await message.answer("✅ Оплата прошла! Доступ выдан.")
+    await message.answer("✅ Оплата прошла! Доступ активирован.")
 
-# ================== CRYPTO PAYMENT (FIXED) ==================
+# ================== CRYPTO PAY ==================
 @router.callback_query(F.data.startswith("crypto:"))
 async def crypto_pay(call: CallbackQuery):
     plan = call.data.split(":")[1]
 
     link = f"https://nowpayments.io/payment/?amount={PLANS[plan]['crypto']}&currency=USDT"
 
-    await call.message.answer(
-        f"💰 Оплата криптой:\n\n{link}"
-    )
-
+    await call.message.answer(f"💰 Оплата криптой:\n\n{link}")
     await call.answer()
 
-# ================== REF SYSTEM (FIXED) ==================
+# ================== REF ==================
 @router.callback_query(F.data == "ref")
 async def ref(call: CallbackQuery):
     text = (
@@ -181,28 +178,82 @@ async def info(call: CallbackQuery):
 @router.callback_query(F.data == "privacy")
 async def privacy(call: CallbackQuery):
 
-    text = """(ПОЛНЫЙ ТЕКСТ ПОЛИТИКИ КОНФИДЕНЦИАЛЬНОСТИ 1:1 КАК ТЫ ПРИСЛАЛ)"""
+    text = """Политика конфиденциальности
+Platega • 1 апреля в 20:29
+Данная Политика конфиденциальности регламентирует сбор идентификаторов аккаунта, технической информации и истории взаимодействий для обеспечения работы сервиса, связи с пользователем и аналитики. Передача данных третьим лицам допускается только по закону, для выполнения обязательств или с согласия пользователя.
+Администрация хранит информацию необходимый срок, применяет разумные меры защиты, но не гарантирует абсолютной безопасности. Пользователь自行承担 риски передачи данных и принимает любые изменения в политике, продолжая использовать сервис.
+Cocoon AI Summary
+Политика конфиденциальности регулирует сбор, использование и защиту информации пользователей сервиса. Собираются идентификаторы аккаунта, техническая информация и история взаимодействий. Данные используются для обеспечения работы сервиса, связи с пользователем и анализа. Передача информации третьим лицам возможна только в законодательно установленных случаях или с согласия пользователя. Хранение данных осуществляется в течение необходимого срока, их защита — в разумных пределах. Пользователь самостоятельно несёт ответственность за риски, связанные с передачей данных. Администрация вправе вносить изменения в Политику без уведомления — согласие считается принятым при дальнейшем использовании сервиса.
 
-    await call.message.answer(
-        text,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬅ Назад", callback_data="info")]
-        ])
-    )
+1. Общие положения
+1.1. Политика регулирует обработку данных.
+1.2. Использование сервиса означает согласие.
+
+2. Сбор информации
+2.1. ID, логин, устройство, IP.
+2.2. Без паспортных данных.
+
+3. Использование
+3.1. Работа сервиса и поддержка.
+
+4. Передача
+4.1. Только по закону или с согласия.
+
+5. Хранение
+5.1. Пока нужно для сервиса.
+
+6. Ответственность
+6.1. Риски на пользователе.
+
+7. Изменения
+7.1. Возможны без уведомления.
+"""
+
+    await call.message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="info")]
+    ]))
     await call.answer()
 
-# ================== FULL TERMS ==================
+# ================== TERMS ==================
 @router.callback_query(F.data == "terms")
 async def terms(call: CallbackQuery):
 
-    text = """(ПОЛНЫЙ ТЕКСТ ПОЛЬЗОВАТЕЛЬСКОГО СОГЛАШЕНИЯ 1:1 КАК ТЫ ПРИСЛАЛ)"""
+    text = """Пользовательское соглашение
+Platega • 1 апреля в 20:30
+1. Общие положения
+1.1. Использование сервиса = согласие.
 
-    await call.message.answer(
-        text,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬅ Назад", callback_data="info")]
-        ])
-    )
+2. Услуги
+2.1. Цифровые материалы и доступ.
+
+3. Ответственность
+3.1. AS IS без гарантий.
+
+4. Использование
+4.1. Только законное применение.
+
+5. Права
+5.1. Материалы защищены.
+
+6. Доступ
+6.1. Может быть ограничен.
+
+7. Платежи
+7.1. Возврат ограничен.
+
+8. Конфиденциальность
+8.1. Минимальные данные.
+
+9. Изменения
+9.1. Возможны.
+
+10. Контакты
+10.1. Через бота.
+"""
+
+    await call.message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="info")]
+    ]))
     await call.answer()
 
 # ================== RUN ==================
