@@ -18,7 +18,6 @@ from aiogram.types import (
 logging.basicConfig(level=logging.INFO)
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-GROUP_ID = int(os.getenv("TELEGRAM_GROUP_ID", "0"))
 CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
 
 bot = Bot(token=BOT_TOKEN)
@@ -29,13 +28,6 @@ dp.include_router(router)
 # ================== DB ==================
 conn = sqlite3.connect("users.db")
 cursor = conn.cursor()
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    expire_date TEXT
-)
-""")
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS payments (
@@ -89,36 +81,24 @@ def back_main_kb():
 # ================== START ==================
 @router.message(CommandStart())
 async def start(message: Message):
-    await message.answer(
-        "👋 Выбери оплату:",
-        reply_markup=main_menu()
-    )
+    await message.answer("👋 Выбери оплату:", reply_markup=main_menu())
 
 # ================== BACK ==================
 @router.callback_query(F.data == "back_main")
 async def back_main(call: CallbackQuery):
-    await call.message.edit_text(
-        "👋 Главное меню:",
-        reply_markup=main_menu()
-    )
+    await call.message.edit_text("👋 Главное меню:", reply_markup=main_menu())
     await call.answer()
 
 # ================== MENUS ==================
 @router.callback_query(F.data == "stars")
 async def stars(call: CallbackQuery):
-    await call.message.edit_text(
-        "⭐ Stars тарифы:",
-        reply_markup=plans_menu("stars")
-    )
+    await call.message.edit_text("⭐ Stars тарифы:", reply_markup=plans_menu("stars"))
     await call.answer()
 
 
 @router.callback_query(F.data == "crypto")
 async def crypto(call: CallbackQuery):
-    await call.message.edit_text(
-        "💰 Crypto тарифы:",
-        reply_markup=plans_menu("crypto")
-    )
+    await call.message.edit_text("💰 Crypto тарифы:", reply_markup=plans_menu("crypto"))
     await call.answer()
 
 # ================== PLAN ==================
@@ -145,14 +125,19 @@ async def crypto_plan(call: CallbackQuery):
     )
     await call.answer()
 
-# ================== STARS PAYMENT (FIXED) ==================
+# ================== STARS PAYMENT (STABLE) ==================
 @router.callback_query(F.data.startswith("pay_stars_"))
 async def pay_stars(call: CallbackQuery):
     plan = call.data.split("_")[2]
     data = PLANS[plan]
 
-    # ❗ ВАЖНО: убираем старое меню (фикс UX)
-    await call.message.delete()
+    # ❗ ВАЖНО: НЕ трогаем invoice UI после отправки
+    # (Telegram Stars не любит редактирование в этот момент)
+
+    await call.message.answer(
+        "💳 Открываю оплату Stars...",
+        reply_markup=back_main_kb()
+    )
 
     await bot.send_invoice(
         chat_id=call.message.chat.id,
@@ -164,14 +149,9 @@ async def pay_stars(call: CallbackQuery):
         prices=[LabeledPrice(label="Access", amount=data["stars"])]
     )
 
-    await call.message.answer(
-        "💳 Окно оплаты Stars открыто.\nЕсли нужно вернуться:",
-        reply_markup=back_main_kb()
-    )
-
     await call.answer()
 
-# ================== CRYPTO ==================
+# ================== CRYPTO PAYMENT ==================
 def create_invoice(amount, payload):
     url = "https://pay.crypt.bot/api/createInvoice"
     headers = {"Crypto-Pay-API-Token": CRYPTO_TOKEN}
