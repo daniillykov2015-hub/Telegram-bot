@@ -84,7 +84,7 @@ def plans(prefix):
 def pay_kb(prefix, plan):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💳 Оплатить", callback_data=f"pay:{prefix}:{plan}")],
-        [InlineKeyboardButton(text="⬅ Назад", callback_data=f"{prefix}")]
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
 
 # ================== START ==================
@@ -92,7 +92,7 @@ def pay_kb(prefix, plan):
 async def start(message: Message):
     await message.answer(MAIN_TEXT, reply_markup=menu())
 
-# ================== SAFE NAV (без смены текста) ==================
+# ================== SAFE NAV ==================
 async def swap(call: CallbackQuery, markup):
     try:
         await call.message.edit_reply_markup(reply_markup=markup)
@@ -127,7 +127,7 @@ async def crypto_plan(call: CallbackQuery):
     plan = call.data.split(":")[1]
     await swap(call, pay_kb("crypto", plan))
 
-# ================== REF SYSTEM (ФИКС) ==================
+# ================== REF SYSTEM (ИСПРАВЛЕНО) ==================
 @router.callback_query(F.data == "ref")
 async def ref(call: CallbackQuery):
     user_id = call.from_user.id
@@ -142,19 +142,20 @@ async def ref(call: CallbackQuery):
 
     text = (
         "👥 РЕФЕРАЛЬНАЯ СИСТЕМА\n\n"
-        "💡 Как получить +7 дней:\n"
+        "💡 Как получить +7 дней:\n\n"
         "1️⃣ У тебя должна быть подписка\n"
-        "2️⃣ Пригласи друга по ссылке\n"
-        "3️⃣ Он оформляет доступ\n"
+        "2️⃣ Отправь ссылку другу\n"
+        "3️⃣ Друг оформляет доступ\n"
         "4️⃣ Ты получаешь +7 дней\n\n"
-        f"🔗 Твоя ссылка:\n{link}\n\n"
-        f"👤 Приглашено: {count}"
+        f"🔗 Ссылка:\n{link}\n\n"
+        f"👤 Приглашено: {count}\n\n"
+        "⬅ Вернись назад кнопкой ниже"
     )
 
-    # ❗ ВАЖНО: теперь НЕ edit_text
+    # ❗ ВСЕГДА единый UX: кнопка назад как везде
     await swap(call, back_kb())
 
-    # отправляем инфо отдельным сообщением (UI не ломается)
+    # текст отдельным сообщением (не ломает интерфейс)
     await call.message.answer(text)
 
 # ================== REF LOGIC ==================
@@ -201,7 +202,7 @@ async def referral_start(message: Message):
         conn.commit()
 
         try:
-            await bot.send_message(ref_id, "🎉 +7 дней за друга начислено!")
+            await bot.send_message(ref_id, "🎉 +7 дней за приглашение начислено!")
         except:
             pass
 
