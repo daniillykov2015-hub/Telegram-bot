@@ -1568,5 +1568,13 @@ async def debug(message: types.Message):
 
 
 
-    if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True)
+    import asyncio
+
+async def start_bot():
+    try:
+        await dp.start_polling()
+    finally:
+        await bot.session.close()
+
+if __name__ == '__main__':
+    asyncio.run(start_bot())
