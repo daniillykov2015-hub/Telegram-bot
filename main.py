@@ -10,14 +10,13 @@ from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ---------------- CONFIG ----------------
-API_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GROUP_ID = int(os.getenv("TELEGRAM_GROUP_ID", "0"))
-CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 logging.basicConfig(level=logging.INFO)
 
-bot = Bot(token=API_TOKEN)
+bot = Bot(TOKEN)
 dp = Dispatcher()
 
 # ---------------- DB ----------------
@@ -28,54 +27,31 @@ cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
     expire_date TEXT,
-    ref_by INTEGER,
-    refs_paid INTEGER DEFAULT 0
-)
-""")
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS payments (
-    invoice_id TEXT PRIMARY KEY,
-    user_id INTEGER,
-    days INTEGER,
-    status TEXT
+    ref_by INTEGER
 )
 """)
 
 conn.commit()
 
-# ---------------- PRICES ----------------
-PLANS = {
-    "1": {"days": 1, "price": 5},
-    "7": {"days": 7, "price": 7},
-    "30": {"days": 30, "price": 10},
-}
-
-# ---------------- KEYBOARDS ----------------
-def main_kb():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Оплата", callback_data="pay")],
-        [InlineKeyboardButton(text="💰 Crypto", callback_data="crypto")],
-        [InlineKeyboardButton(text="🎁 Рефералка", callback_data="ref")],
-        [InlineKeyboardButton(text="📅 Подписка", callback_data="sub")],
-    ])
-
-
-def pay_kb():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="1 день", callback_data="p_1")],
-        [InlineKeyboardButton(text="7 дней", callback_data="p_7")],
-        [InlineKeyboardButton(text="30 дней", callback_data="p_30")],
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
-    ])
-
-
 # ---------------- UTIL ----------------
+def parse_args(message: types.Message) -> str:
+    """
+    SAFE ARG PARSER (v3 replacement for get_args)
+    """
+    text = message.text or ""
+    parts = text.split(maxsplit=1)
+    return parts[1] if len(parts) > 1 else ""
+
+
 def get_expire(user_id: int):
     cursor.execute("SELECT expire_date FROM users WHERE user_id=?", (user_id,))
     row = cursor.fetchone()
+
     if row and row[0]:
-        return datetime.fromisoformat(row[0])
+        try:
+            return datetime.fromisoformat(row[0])
+        except:
+            return None
     return None
 
 
@@ -85,166 +61,146 @@ def set_expire(user_id: int, days: int):
     cursor.execute("""
     INSERT INTO users (user_id, expire_date)
     VALUES (?, ?)
-    ON CONFLICT(user_id) DO UPDATE SET expire_date=excluded.expire_date
+    ON CONFLICT(user_id)
+    DO UPDATE SET expire_date=excluded.expire_date
     """, (user_id, expire.isoformat()))
 
     conn.commit()
     return expire
 
 
+# ---------------- KEYBOARD ----------------
+def main_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📅 Подписка", callback_data="sub")],
+        [InlineKeyboardButton(text="🎁 Рефералка", callback_data="ref")],
+        [InlineKeyboardButton(text="ℹ️ Инфо", callback_data="info")]
+    ])
+
+
 # ---------------- START ----------------
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    args = message.get_args()
+    args = parse_args(message)
 
+    # referral
     if args.isdigit():
-        ref = int(args)
-        if ref != message.from_user.id:
+        ref_id = int(args)
+        if ref_id != message.from_user.id:
             cursor.execute("SELECT user_id FROM users WHERE user_id=?", (message.from_user.id,))
             if not cursor.fetchone():
                 cursor.execute(
                     "INSERT INTO users (user_id, ref_by) VALUES (?, ?)",
-                    (message.from_user.id, ref)
+                    (message.from_user.id, ref_id)
                 )
                 conn.commit()
 
     await message.answer(
-        "🔥 PRO BOT ACTIVE\n\nВыбери действие:",
+        "🔥 STABLE CORE v3\n\nВыбери действие:",
         reply_markup=main_kb()
     )
 
 
-# ---------------- MENU ----------------
+# ---------------- CALLBACKS ----------------
 @dp.callback_query()
-async def menu(call: types.CallbackQuery):
+async def router(call: types.CallbackQuery):
     await call.answer()
     data = call.data
 
-    if data == "back":
-        await call.message.edit_text("Главное меню", reply_markup=main_kb())
+    # BACK / INFO
+    if data == "info":
+        await call.message.edit_text(
+            "ℹ️ Это стабильный core бот v3.\nБез падений и старых багов.",
+            reply_markup=main_kb()
+        )
 
-    elif data == "pay":
-        await call.message.edit_text("Выбери тариф:", reply_markup=pay_kb())
+    elif data == "ref":
+        link = f"https://t.me/{(await bot.get_me()).username}?start={call.from_user.id}"
+        await call.message.edit_text(
+            f"🎁 Реферальная ссылка:\n{link}",
+            reply_markup=main_kb()
+        )
 
     elif data == "sub":
         exp = get_expire(call.from_user.id)
 
-        text = "Нет подписки ❌"
-        if exp and exp > datetime.now():
-            text = f"Активна до: {exp.strftime('%d.%m.%Y %H:%M')}"
+        if not exp:
+            text = "❌ Подписка отсутствует"
+        elif exp < datetime.now():
+            text = "❌ Подписка истекла"
+        else:
+            text = f"✅ Активна до: {exp.strftime('%d.%m.%Y %H:%M')}"
 
         await call.message.edit_text(text, reply_markup=main_kb())
 
-    elif data == "ref":
-        link = f"https://t.me/{(await bot.get_me()).username}?start={call.from_user.id}"
-        await call.message.edit_text(f"Рефералка:\n{link}", reply_markup=main_kb())
-
-    elif data == "crypto":
-        await call.message.edit_text("Crypto активируется...", reply_markup=main_kb())
-
-    # ---------------- PAYMENT FLOW ----------------
-    elif data.startswith("p_"):
-        days = int(data.split("_")[1])
-        price = PLANS[str(days)]["price"]
-
-        expire = set_expire(call.from_user.id, days)
-
-        invite = await bot.create_chat_invite_link(
-            chat_id=GROUP_ID,
-            member_limit=1
-        )
+    elif data == "buy_1":
+        expire = set_expire(call.from_user.id, 1)
 
         await call.message.edit_text(
-            f"✅ Оплата подтверждена\n\n"
-            f"Доступ до: {expire.strftime('%d.%m.%Y %H:%M')}\n\n"
-            f"{invite.invite_link}",
+            f"✅ Подписка активирована\nДо: {expire.strftime('%d.%m.%Y')}",
             reply_markup=main_kb()
         )
 
 
-# ---------------- CRYPTOBOT ----------------
-def create_invoice(amount: float, user_id: int):
-    url = "https://pay.crypt.bot/api/createInvoice"
-    headers = {"Crypto-Pay-API-Token": CRYPTO_TOKEN}
+# ---------------- ADMIN ----------------
+@dp.message(Command("users"))
+async def users(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
 
-    data = {
-        "asset": "USDT",
-        "amount": amount,
-        "description": f"user_{user_id}"
-    }
+    cursor.execute("SELECT COUNT(*) FROM users")
+    count = cursor.fetchone()[0]
 
-    r = requests.post(url, headers=headers, json=data)
-    return r.json()
+    await message.answer(f"👥 Users: {count}")
 
 
-# ---------------- CHECK CRYPTO PAYMENTS ----------------
-async def check_crypto():
+# ---------------- SAFE CRYPTO (stub) ----------------
+async def crypto_checker():
+    """
+    SAFE LOOP (no crash)
+    """
     while True:
-        cursor.execute("SELECT invoice_id, user_id, days FROM payments WHERE status='pending'")
-        rows = cursor.fetchall()
+        try:
+            # сюда потом подключим CryptoBot API
+            pass
+        except Exception as e:
+            logging.warning(f"crypto loop error: {e}")
 
-        for invoice_id, user_id, days in rows:
-            try:
-                r = requests.get(
-                    "https://pay.crypt.bot/api/getInvoices",
-                    headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
-                    params={"invoice_ids": invoice_id}
-                ).json()
-
-                items = r.get("result", {}).get("items", [])
-
-                if items and items[0]["status"] == "paid":
-                    expire = set_expire(user_id, days)
-
-                    invite = await bot.create_chat_invite_link(
-                        chat_id=GROUP_ID,
-                        member_limit=1
-                    )
-
-                    await bot.send_message(
-                        user_id,
-                        f"✅ Оплата прошла\n"
-                        f"Доступ до: {expire.strftime('%d.%m.%Y')}\n\n"
-                        f"{invite.invite_link}"
-                    )
-
-                    cursor.execute(
-                        "UPDATE payments SET status='paid' WHERE invoice_id=?",
-                        (invoice_id,)
-                    )
-                    conn.commit()
-
-            except Exception as e:
-                logging.warning(e)
-
-        await asyncio.sleep(20)
+        await asyncio.sleep(30)
 
 
 # ---------------- SUB CHECK ----------------
-async def check_subs():
+async def sub_checker():
     while True:
-        now = datetime.now()
+        try:
+            now = datetime.now()
 
-        cursor.execute("SELECT user_id, expire_date FROM users")
-        rows = cursor.fetchall()
+            cursor.execute("SELECT user_id, expire_date FROM users")
+            rows = cursor.fetchall()
 
-        for uid, exp in rows:
-            if not exp:
-                continue
+            for uid, exp in rows:
+                if not exp:
+                    continue
 
-            try:
-                if datetime.fromisoformat(exp) < now:
-                    await bot.send_message(uid, "❌ Подписка закончилась")
-            except:
-                pass
+                try:
+                    if datetime.fromisoformat(exp) < now:
+                        await bot.send_message(uid, "❌ Подписка истекла")
+                except:
+                    pass
+
+        except Exception as e:
+            logging.warning(f"sub checker error: {e}")
 
         await asyncio.sleep(300)
 
 
-# ---------------- START ----------------
+# ---------------- STARTUP ----------------
 async def main():
-    asyncio.create_task(check_subs())
-    asyncio.create_task(check_crypto())
+    logging.info("BOT STARTED (STABLE CORE v3)")
+
+    asyncio.create_task(sub_checker())
+    asyncio.create_task(crypto_checker())
+
     await dp.start_polling(bot)
 
 
