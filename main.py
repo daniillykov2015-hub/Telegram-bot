@@ -1564,13 +1564,14 @@ async def debug(message: types.Message):
 
 
 
-    async def start_bot():
+async def start_bot():
     try:
-        # bot — это имя переменной вашего бота из начала файла
+        # Эти строки ДОЛЖНЫ иметь отступ в 8 пробелов от края
         await dp.start_polling(bot)
     finally:
+        # И эта тоже
         await bot.session.close()
 
 if __name__ == '__main__':
-    import asyncio
+    # Эта строка без отступа
     asyncio.run(start_bot())
