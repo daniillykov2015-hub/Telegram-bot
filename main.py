@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import requests
 
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 from aiogram.types import (
     Message,
     CallbackQuery,
@@ -21,11 +21,8 @@ from aiogram.types import (
 logging.basicConfig(level=logging.INFO)
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-GROUP_ID = int(os.getenv("TELEGRAM_GROUP_ID", "0"))
 CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
-
-if not BOT_TOKEN or not CRYPTO_TOKEN:
-    raise RuntimeError("❌ Missing ENV variables")
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -55,7 +52,7 @@ CREATE TABLE IF NOT EXISTS payments (
 conn.commit()
 
 # ================== CACHE ==================
-active_invoices = {}  # user_id -> plan
+active_invoices = {}
 
 # ================== PLANS ==================
 PLANS = {
@@ -72,37 +69,34 @@ async def grant_access(user_id: int, days: int):
     now = datetime.utcnow()
 
     if row and row[0]:
-        current_expire = datetime.fromisoformat(row[0])
-        if current_expire > now:
-            new_expire = current_expire + timedelta(days=days)
-        else:
-            new_expire = now + timedelta(days=days)
+        current = datetime.fromisoformat(row[0])
+        new_expire = current + timedelta(days=days) if current > now else now + timedelta(days=days)
     else:
         new_expire = now + timedelta(days=days)
 
-    cursor.execute(
-        "INSERT OR REPLACE INTO users VALUES (?, ?)",
-        (user_id, new_expire.isoformat())
-    )
+    cursor.execute("INSERT OR REPLACE INTO users VALUES (?, ?)", (user_id, new_expire.isoformat()))
     conn.commit()
 
     try:
-        await bot.send_message(
-            user_id,
-            f"✅ Доступ активирован до:\n{new_expire.strftime('%Y-%m-%d %H:%M')}"
-        )
+        await bot.send_message(user_id, f"✅ Доступ до:\n{new_expire.strftime('%Y-%m-%d %H:%M')}")
     except:
         pass
 
+    active_invoices.pop(user_id, None)
 
 # ================== KEYBOARDS ==================
-def menu():
-    return InlineKeyboardMarkup(inline_keyboard=[
+def menu(active=False):
+    kb = [
         [
             InlineKeyboardButton(text="⭐ Stars", callback_data="stars"),
             InlineKeyboardButton(text="💰 Crypto", callback_data="crypto"),
         ]
-    ])
+    ]
+
+    if active:
+        kb.append([InlineKeyboardButton(text="🔁 Продлить", callback_data="renew")])
+
+    return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
 def plans(prefix: str):
@@ -120,8 +114,7 @@ def pay(prefix: str, plan: str):
         [InlineKeyboardButton(text="⬅ Назад", callback_data=prefix)]
     ])
 
-
-# ================== START (WITH SUB CHECK) ==================
+# ================== START ==================
 @router.message(CommandStart())
 async def start(message: Message):
     cursor.execute("SELECT expire_date FROM users WHERE user_id=?", (message.from_user.id,))
@@ -131,40 +124,74 @@ async def start(message: Message):
         expire = datetime.fromisoformat(row[0])
         if expire > datetime.utcnow():
             await message.answer(
-                f"👋 У тебя активна подписка до:\n{expire.strftime('%Y-%m-%d %H:%M')}",
-                reply_markup=menu()
+                f"👋 Подписка до:\n{expire.strftime('%Y-%m-%d %H:%M')}",
+                reply_markup=menu(active=True)
             )
             return
 
     await message.answer("👋 Выбери оплату:", reply_markup=menu())
 
+# ================== HISTORY ==================
+@router.message(Command("history"))
+async def history(message: Message):
+    cursor.execute("SELECT days, status FROM payments WHERE user_id=? ORDER BY rowid DESC LIMIT 5",
+                   (message.from_user.id,))
+    rows = cursor.fetchall()
+
+    if not rows:
+        await message.answer("История пуста")
+        return
+
+    text = "🧾 Последние оплаты:\n\n"
+    for d, s in rows:
+        text += f"{d} дней — {s}\n"
+
+    await message.answer(text)
+
+# ================== ADMIN ==================
+@router.message(Command("admin"))
+async def admin(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    cursor.execute("SELECT COUNT(*) FROM users")
+    users = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM payments")
+    pays = cursor.fetchone()[0]
+
+    await message.answer(f"👑 Админка\n\nПользователи: {users}\nПлатежи: {pays}")
 
 # ================== BACK ==================
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
-    await call.message.edit_text("Главное меню", reply_markup=menu())
+    await call.message.edit_text("Меню", reply_markup=menu())
     await call.answer()
-
 
 # ================== MENUS ==================
 @router.callback_query(F.data == "stars")
 async def stars(call: CallbackQuery):
-    await call.message.edit_text("⭐ Stars тарифы", reply_markup=plans("stars"))
+    await call.message.edit_text("⭐ Тарифы", reply_markup=plans("stars"))
     await call.answer()
 
 
 @router.callback_query(F.data == "crypto")
 async def crypto(call: CallbackQuery):
-    await call.message.edit_text("💰 Crypto тарифы", reply_markup=plans("crypto"))
+    await call.message.edit_text("💰 Тарифы", reply_markup=plans("crypto"))
     await call.answer()
 
+# ================== RENEW ==================
+@router.callback_query(F.data == "renew")
+async def renew(call: CallbackQuery):
+    await call.message.edit_text("🔁 Продлить подписку:", reply_markup=plans("crypto"))
+    await call.answer()
 
 # ================== PLANS ==================
 @router.callback_query(F.data.startswith("stars_"))
 async def stars_plan(call: CallbackQuery):
     p = call.data.split("_")[1]
     await call.message.edit_text(
-        f"⭐ {p} дней — {PLANS[p]['stars']}⭐",
+        f"{p} дней — {PLANS[p]['stars']}⭐",
         reply_markup=pay("stars", p)
     )
     await call.answer()
@@ -174,11 +201,10 @@ async def stars_plan(call: CallbackQuery):
 async def crypto_plan(call: CallbackQuery):
     p = call.data.split("_")[1]
     await call.message.edit_text(
-        f"💰 {p} дней — {PLANS[p]['crypto']} USDT",
+        f"{p} дней — {PLANS[p]['crypto']} USDT",
         reply_markup=pay("crypto", p)
     )
     await call.answer()
-
 
 # ================== STARS ==================
 @router.callback_query(F.data.startswith("pay_stars_"))
@@ -189,7 +215,7 @@ async def pay_stars(call: CallbackQuery):
     await bot.send_invoice(
         chat_id=call.message.chat.id,
         title="Access",
-        description="Stars payment",
+        description="Stars",
         payload=f"stars_{plan}",
         provider_token="",
         currency="XTR",
@@ -207,43 +233,37 @@ async def pre_checkout(pre: PreCheckoutQuery):
 @router.message(F.successful_payment)
 async def stars_success(message: Message):
     payload = message.successful_payment.invoice_payload
+    plan = payload.split("_")[1]
 
-    if payload.startswith("stars_"):
-        plan = payload.split("_")[1]
-        await grant_access(message.from_user.id, PLANS[plan]["days"])
+    await grant_access(message.from_user.id, PLANS[plan]["days"])
 
-
-# ================== CRYPTO (ANTI DUPLICATE) ==================
+# ================== CRYPTO ==================
 @router.callback_query(F.data.startswith("pay_crypto_"))
 async def pay_crypto(call: CallbackQuery):
     plan = call.data.split("_")[2]
 
-    # ❌ защита от дублей
     if call.from_user.id in active_invoices:
-        await call.answer("⏳ Уже создан счёт", show_alert=True)
+        await call.answer("⏳ Уже есть счёт", show_alert=True)
         return
 
     active_invoices[call.from_user.id] = plan
     data = PLANS[plan]
 
-    url = "https://pay.crypt.bot/api/createInvoice"
-    headers = {"Crypto-Pay-API-Token": CRYPTO_TOKEN}
+    r = requests.post(
+        "https://pay.crypt.bot/api/createInvoice",
+        headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
+        json={
+            "asset": "USDT",
+            "amount": data["crypto"],
+            "description": f"{plan} days"
+        }
+    ).json()
 
-    r = requests.post(url, headers=headers, json={
-        "asset": "USDT",
-        "amount": data["crypto"],
-        "description": f"{plan} days access",
-        "allow_comments": False
-    })
-
-    res = r.json()
-
-    if not res.get("ok"):
-        active_invoices.pop(call.from_user.id, None)
-        await call.message.answer("❌ Ошибка платежа")
+    if not r.get("ok"):
+        await call.message.answer("Ошибка оплаты")
         return
 
-    invoice = res["result"]
+    invoice = r["result"]
 
     cursor.execute(
         "INSERT INTO payments VALUES (?, ?, ?, ?)",
@@ -251,14 +271,12 @@ async def pay_crypto(call: CallbackQuery):
     )
     conn.commit()
 
-    await call.message.answer(f"💰 Оплата создана:\n{invoice['pay_url']}")
+    await call.message.answer(f"💰 Оплати:\n{invoice['pay_url']}")
     await call.answer()
-
 
 # ================== RUN ==================
 async def main():
     await dp.start_polling(bot)
-
 
 if __name__ == "__main__":
     asyncio.run(main())
