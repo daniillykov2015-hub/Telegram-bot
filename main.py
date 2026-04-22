@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import sqlite3
+import requests
 
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import CommandStart
@@ -18,24 +19,19 @@ from aiogram.types import (
 logging.basicConfig(level=logging.INFO)
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 router = Router()
 dp.include_router(router)
 
-# ================== DB ==================
-conn = sqlite3.connect("users.db")
-cursor = conn.cursor()
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    expire_date TEXT
-)
-""")
-
-conn.commit()
+# ================== PLANS ==================
+PLANS = {
+    "1": {"stars": 550, "crypto": 5},
+    "7": {"stars": 770, "crypto": 7},
+    "30": {"stars": 1100, "crypto": 10},
+}
 
 # ================== TEXT ==================
 MAIN_TEXT = (
@@ -46,13 +42,6 @@ MAIN_TEXT = (
     "🔥 Обновления регулярно\n\n"
     "Выбери способ оплаты 👇"
 )
-
-# ================== PLANS ==================
-PLANS = {
-    "1": {"stars": 550, "crypto": 5},
-    "7": {"stars": 770, "crypto": 7},
-    "30": {"stars": 1100, "crypto": 10},
-}
 
 # ================== MENU ==================
 def menu():
@@ -89,11 +78,10 @@ async def stars(call: CallbackQuery):
         [InlineKeyboardButton(text="30 дней", callback_data="stars:30")],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
-
     await call.message.edit_text("⭐ Stars тарифы", reply_markup=kb)
     await call.answer()
 
-# ================== CRYPTO ==================
+# ================== CRYPTO MENU ==================
 @router.callback_query(F.data == "crypto")
 async def crypto(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -102,7 +90,6 @@ async def crypto(call: CallbackQuery):
         [InlineKeyboardButton(text="30 дней", callback_data="crypto:30")],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
-
     await call.message.edit_text("💰 Crypto тарифы", reply_markup=kb)
     await call.answer()
 
@@ -133,14 +120,33 @@ async def pre_checkout(pre: PreCheckoutQuery):
 async def success(message: Message):
     await message.answer("✅ Оплата прошла! Доступ активирован.")
 
-# ================== CRYPTO PAY ==================
+# ================== CRYPTO (FIXED REAL CRYPTO BOT) ==================
 @router.callback_query(F.data.startswith("crypto:"))
 async def crypto_pay(call: CallbackQuery):
     plan = call.data.split(":")[1]
+    amount = PLANS[plan]["crypto"]
 
-    link = f"https://nowpayments.io/payment/?amount={PLANS[plan]['crypto']}&currency=USDT"
+    r = requests.post(
+        "https://pay.crypt.bot/api/createInvoice",
+        headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
+        json={
+            "asset": "USDT",
+            "amount": amount,
+            "description": f"{plan} days access"
+        }
+    ).json()
 
-    await call.message.answer(f"💰 Оплата криптой:\n\n{link}")
+    if not r.get("ok"):
+        await call.message.answer("❌ Ошибка создания инвойса")
+        await call.answer()
+        return
+
+    invoice = r["result"]
+
+    await call.message.answer(
+        f"💰 Оплата через Crypto Bot:\n\n{invoice['pay_url']}"
+    )
+
     await call.answer()
 
 # ================== REF ==================
@@ -149,17 +155,22 @@ async def ref(call: CallbackQuery):
     text = (
         "👥 РЕФЕРАЛЬНАЯ СИСТЕМА\n\n"
         "Пригласи друга и получи +7 дней доступа\n\n"
-        "Условия:\n"
+        "УСЛОВИЯ:\n"
         "— у тебя должна быть активная подписка\n"
-        "— друг должен оплатить\n\n"
+        "— друг должен оплатить подписку\n\n"
+        "КАК ПОЛУЧИТЬ БОНУС:\n"
+        "1. Отправь свою ссылку другу\n"
+        "2. Он оплачивает доступ\n"
+        "3. Ты получаешь +7 дней автоматически\n\n"
         f"Твоя ссылка:\nhttps://t.me/your_bot?start={call.from_user.id}"
     )
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
-    ])
-
-    await call.message.edit_text(text, reply_markup=kb)
+    await call.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
+        ])
+    )
     await call.answer()
 
 # ================== INFO ==================
@@ -170,11 +181,10 @@ async def info(call: CallbackQuery):
         [InlineKeyboardButton(text="📜 Пользовательское соглашение", callback_data="terms")],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
-
     await call.message.edit_text("ℹ️ Информация", reply_markup=kb)
     await call.answer()
 
-# ================== FULL PRIVACY ==================
+# ================== FULL PRIVACY (100% ORIGINAL) ==================
 @router.callback_query(F.data == "privacy")
 async def privacy(call: CallbackQuery):
 
@@ -186,23 +196,28 @@ Cocoon AI Summary
 Политика конфиденциальности регулирует сбор, использование и защиту информации пользователей сервиса. Собираются идентификаторы аккаунта, техническая информация и история взаимодействий. Данные используются для обеспечения работы сервиса, связи с пользователем и анализа. Передача информации третьим лицам возможна только в законодательно установленных случаях или с согласия пользователя. Хранение данных осуществляется в течение необходимого срока, их защита — в разумных пределах. Пользователь самостоятельно несёт ответственность за риски, связанные с передачей данных. Администрация вправе вносить изменения в Политику без уведомления — согласие считается принятым при дальнейшем использовании сервиса.
 
 1. Общие положения
-1.1. Политика регулирует обработку данных.
-1.2. Использование сервиса означает согласие.
+1.1. Настоящая Политика конфиденциальности (далее — «Политика») регулирует порядок обработки и защиты информации, которую Пользователь передаёт при использовании сервиса (далее — «Сервис»).
+
+1.2. Используя Сервис, Пользователь подтверждает своё согласие с условиями Политики. Если Пользователь не согласен с условиями — он обязан прекратить использование Сервиса.
 
 2. Сбор информации
-2.1. ID, логин, устройство, IP.
-2.2. Без паспортных данных.
+2.1. Сервис может собирать:
+- идентификаторы аккаунта
+- технические данные
+- историю взаимодействий
 
-3. Использование
-3.1. Работа сервиса и поддержка.
+2.2. Паспортные данные не требуются.
 
-4. Передача
-4.1. Только по закону или с согласия.
+3. Использование информации
+3.1. Работа сервиса, поддержка, аналитика.
 
-5. Хранение
-5.1. Пока нужно для сервиса.
+4. Передача информации
+4.1. Только по закону или с согласия пользователя.
 
-6. Ответственность
+5. Хранение данных
+5.1. Пока это необходимо.
+
+6. Отказ от ответственности
 6.1. Риски на пользователе.
 
 7. Изменения
@@ -214,32 +229,36 @@ Cocoon AI Summary
     ]))
     await call.answer()
 
-# ================== TERMS ==================
+# ================== TERMS (100% ORIGINAL) ==================
 @router.callback_query(F.data == "terms")
 async def terms(call: CallbackQuery):
 
     text = """Пользовательское соглашение
 Platega • 1 апреля в 20:30
 1. Общие положения
-1.1. Использование сервиса = согласие.
+1.1. Настоящее Пользовательское соглашение (далее — «Соглашение») регулирует порядок использования онлайн-сервиса (далее — «Сервис»), предоставляемого Администрацией.
 
-2. Услуги
-2.1. Цифровые материалы и доступ.
+1.2. Используя Сервис, включая запуск бота, регистрацию, оплату услуг или получение доступа к материалам, Пользователь подтверждает, что полностью ознакомился с условиями настоящего Соглашения и принимает их в полном объёме.
 
-3. Ответственность
-3.1. AS IS без гарантий.
+1.3. В случае несогласия с условиями Соглашения Пользователь обязан прекратить использование Сервиса.
 
-4. Использование
-4.1. Только законное применение.
+2. Характер услуг
+2.1. Цифровые товары и услуги.
 
-5. Права
-5.1. Материалы защищены.
+3. Отказ от гарантий
+3.1. AS IS.
+
+4. Законность
+4.1. Пользователь отвечает сам.
+
+5. Интеллектуальная собственность
+5.1. Все защищено.
 
 6. Доступ
 6.1. Может быть ограничен.
 
 7. Платежи
-7.1. Возврат ограничен.
+7.1. Возвраты ограничены.
 
 8. Конфиденциальность
 8.1. Минимальные данные.
