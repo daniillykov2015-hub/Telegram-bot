@@ -15,6 +15,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     LabeledPrice,
     PreCheckoutQuery,
+    ChatMember,
     ChatInviteLink
 )
 
@@ -63,6 +64,25 @@ PLANS = {
     "30": {"days": 30, "stars": 1100, "crypto": 10},
 }
 
+# ================== HELPERS ==================
+async def is_user_in_channel(user_id: int) -> bool:
+    try:
+        member: ChatMember = await bot.get_chat_member(CHANNEL_ID, user_id)
+        return member.status in ("member", "administrator", "creator")
+    except:
+        return False
+
+
+async def create_secure_invite():
+    expire_date = datetime.utcnow() + timedelta(minutes=10)
+    invite: ChatInviteLink = await bot.create_chat_invite_link(
+        chat_id=CHANNEL_ID,
+        member_limit=1,
+        expire_date=expire_date
+    )
+    return invite.invite_link
+
+
 # ================== ACCESS ==================
 async def grant_access(user_id: int, days: int):
     now = datetime.utcnow()
@@ -82,39 +102,49 @@ async def grant_access(user_id: int, days: int):
     )
     conn.commit()
 
-    # 🔗 ссылка в канал
-    invite: ChatInviteLink = await bot.create_chat_invite_link(
-        chat_id=CHANNEL_ID,
-        member_limit=1
-    )
+    if await is_user_in_channel(user_id):
+        text = (
+            f"✅ Подписка продлена до:\n{new_expire.strftime('%Y-%m-%d %H:%M')}\n\n"
+            f"Ты уже в канале 👍"
+        )
+    else:
+        link = await create_secure_invite()
+        text = (
+            f"✅ Доступ до:\n{new_expire.strftime('%Y-%m-%d %H:%M')}\n\n"
+            f"👉 Вход (10 минут):\n{link}"
+        )
 
     try:
-        await bot.send_message(
-            user_id,
-            f"✅ Доступ до:\n{new_expire.strftime('%Y-%m-%d %H:%M')}\n\n"
-            f"👉 Вход в канал:\n{invite.invite_link}"
-        )
+        await bot.send_message(user_id, text)
     except:
         pass
 
     active_invoices.pop(user_id, None)
 
+
 # ================== AUTO REMOVE ==================
 async def remove_expired_users():
     while True:
         now = datetime.utcnow()
+
         cursor.execute("SELECT user_id, expire_date FROM users")
         rows = cursor.fetchall()
 
         for user_id, exp in rows:
-            if exp and datetime.fromisoformat(exp) < now:
+            if not exp:
+                continue
+
+            if datetime.fromisoformat(exp) < now:
                 try:
-                    await bot.ban_chat_member(CHANNEL_ID, user_id)
-                    await bot.unban_chat_member(CHANNEL_ID, user_id)
+                    member = await bot.get_chat_member(CHANNEL_ID, user_id)
+                    if member.status in ("member", "administrator", "creator"):
+                        await bot.ban_chat_member(CHANNEL_ID, user_id)
+                        await bot.unban_chat_member(CHANNEL_ID, user_id)
                 except:
                     pass
 
-        await asyncio.sleep(3600)
+        await asyncio.sleep(1800)
+
 
 # ================== KEYBOARDS ==================
 def menu(active=False):
@@ -124,9 +154,12 @@ def menu(active=False):
             InlineKeyboardButton(text="💰 Crypto", callback_data="crypto"),
         ]
     ]
+
     if active:
         kb.append([InlineKeyboardButton(text="🔁 Продлить", callback_data="renew")])
+
     return InlineKeyboardMarkup(inline_keyboard=kb)
+
 
 def plans(prefix):
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -136,28 +169,42 @@ def plans(prefix):
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
 
+
 def pay(prefix, plan):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💳 Оплатить", callback_data=f"pay_{prefix}_{plan}")],
         [InlineKeyboardButton(text="⬅ Назад", callback_data=prefix)]
     ])
 
+
 # ================== START ==================
 @router.message(CommandStart())
 async def start(message: Message):
-    cursor.execute("SELECT expire_date FROM users WHERE user_id=?", (message.from_user.id,))
+    user_id = message.from_user.id
+
+    cursor.execute("SELECT expire_date FROM users WHERE user_id=?", (user_id,))
     row = cursor.fetchone()
 
     if row and row[0]:
-        exp = datetime.fromisoformat(row[0])
-        if exp > datetime.utcnow():
-            await message.answer(
-                f"👋 Подписка до:\n{exp.strftime('%Y-%m-%d %H:%M')}",
-                reply_markup=menu(active=True)
-            )
+        expire = datetime.fromisoformat(row[0])
+
+        if expire > datetime.utcnow():
+            if await is_user_in_channel(user_id):
+                await message.answer(
+                    f"👋 Подписка активна до:\n{expire.strftime('%Y-%m-%d %H:%M')}\n\nТы уже в канале 👍",
+                    reply_markup=menu(active=True)
+                )
+            else:
+                link = await create_secure_invite()
+                await message.answer(
+                    f"👋 Подписка активна до:\n{expire.strftime('%Y-%m-%d %H:%M')}\n\n"
+                    f"👉 Войти (10 минут):\n{link}",
+                    reply_markup=menu(active=True)
+                )
             return
 
     await message.answer("👋 Выбери оплату:", reply_markup=menu())
+
 
 # ================== HISTORY ==================
 @router.message(Command("history"))
@@ -178,6 +225,7 @@ async def history(message: Message):
 
     await message.answer(text)
 
+
 # ================== ADMIN ==================
 @router.message(Command("admin"))
 async def admin(message: Message):
@@ -192,28 +240,31 @@ async def admin(message: Message):
 
     await message.answer(f"👑 Админ\n\nПользователи: {users}\nПлатежи: {pays}")
 
-# ================== BACK ==================
+
+# ================== NAVIGATION ==================
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
     await call.message.edit_text("Меню", reply_markup=menu())
     await call.answer()
 
-# ================== MENUS ==================
+
 @router.callback_query(F.data == "stars")
 async def stars(call: CallbackQuery):
     await call.message.edit_text("⭐ Тарифы", reply_markup=plans("stars"))
     await call.answer()
+
 
 @router.callback_query(F.data == "crypto")
 async def crypto(call: CallbackQuery):
     await call.message.edit_text("💰 Тарифы", reply_markup=plans("crypto"))
     await call.answer()
 
-# ================== RENEW ==================
+
 @router.callback_query(F.data == "renew")
 async def renew(call: CallbackQuery):
     await call.message.edit_text("🔁 Продлить:", reply_markup=plans("crypto"))
     await call.answer()
+
 
 # ================== PLANS ==================
 @router.callback_query(F.data.startswith("stars_"))
@@ -225,6 +276,7 @@ async def stars_plan(call: CallbackQuery):
     )
     await call.answer()
 
+
 @router.callback_query(F.data.startswith("crypto_"))
 async def crypto_plan(call: CallbackQuery):
     p = call.data.split("_")[1]
@@ -233,6 +285,7 @@ async def crypto_plan(call: CallbackQuery):
         reply_markup=pay("crypto", p)
     )
     await call.answer()
+
 
 # ================== STARS ==================
 @router.callback_query(F.data.startswith("pay_stars_"))
@@ -249,16 +302,20 @@ async def pay_stars(call: CallbackQuery):
         currency="XTR",
         prices=[LabeledPrice(label="Access", amount=data["stars"])]
     )
+
     await call.answer()
+
 
 @router.pre_checkout_query()
 async def pre_checkout(pre: PreCheckoutQuery):
     await pre.answer(ok=True)
 
+
 @router.message(F.successful_payment)
 async def stars_success(message: Message):
     plan = message.successful_payment.invoice_payload.split("_")[1]
     await grant_access(message.from_user.id, PLANS[plan]["days"])
+
 
 # ================== CRYPTO ==================
 @router.callback_query(F.data.startswith("pay_crypto_"))
@@ -289,10 +346,12 @@ async def pay_crypto(call: CallbackQuery):
     await call.message.answer(f"💰 Оплата:\n{invoice['pay_url']}")
     await call.answer()
 
+
 # ================== RUN ==================
 async def main():
     asyncio.create_task(remove_expired_users())
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
