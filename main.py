@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import sqlite3
+from datetime import datetime, timedelta
 
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import CommandStart
@@ -36,7 +37,6 @@ def require_env(name: str, value: str | None, allow_int: bool = False):
 BOT_TOKEN = require_env("TELEGRAM_BOT_TOKEN", os.getenv("TELEGRAM_BOT_TOKEN"))
 GROUP_ID = require_env("TELEGRAM_GROUP_ID", os.getenv("TELEGRAM_GROUP_ID"), allow_int=True)
 CRYPTO_TOKEN = require_env("CRYPTO_TOKEN", os.getenv("CRYPTO_TOKEN"))
-
 
 if not BOT_TOKEN or not GROUP_ID or not CRYPTO_TOKEN:
     raise RuntimeError("❌ Бот не запущен: проверь TELEGRAM_BOT_TOKEN / TELEGRAM_GROUP_ID / CRYPTO_TOKEN")
@@ -77,6 +77,22 @@ PLANS = {
     "7": {"days": 7, "stars": 770, "crypto": 7},
     "30": {"days": 30, "stars": 1100, "crypto": 10},
 }
+
+
+# ================== ACCESS SYSTEM ==================
+async def grant_access(user_id: int, days: int):
+    expire = datetime.utcnow() + timedelta(days=days)
+
+    cursor.execute(
+        "INSERT OR REPLACE INTO users (user_id, expire_date) VALUES (?, ?)",
+        (user_id, expire.isoformat())
+    )
+    conn.commit()
+
+    try:
+        await bot.send_message(user_id, f"✅ Доступ активирован на {days} дней!")
+    except Exception as e:
+        logging.error(f"ACCESS ERROR: {e}")
 
 
 # ================== KEYBOARDS ==================
@@ -188,6 +204,9 @@ async def pay_stars(call: CallbackQuery):
         prices=[LabeledPrice(label="Access", amount=data["stars"])]
     )
 
+    # 🔥 ВАЖНО: сразу фиксируем доступ (MVP-логика)
+    await grant_access(call.from_user.id, data["days"])
+
     await call.answer()
 
 
@@ -201,6 +220,9 @@ async def pay_crypto(call: CallbackQuery):
         f"💰 Оплата: {data['crypto']} USDT\nСсылка на оплату будет здесь",
         reply_markup=back_kb()
     )
+
+    # 🔥 тоже фиксируем доступ (пока MVP)
+    await grant_access(call.from_user.id, data["days"])
 
     await call.answer()
 
