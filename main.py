@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS referrals (
 
 conn.commit()
 
-# ================== MAIN TEXT ==================
+# ================== TEXT ==================
 MAIN_TEXT = (
     "👋 Привет, я Ева и это мой закрытый канал\n\n"
     "❓ Что внутри?\n\n"
@@ -51,6 +51,13 @@ MAIN_TEXT = (
     "🔥 Обновления регулярно\n\n"
     "Выбери способ оплаты 👇"
 )
+
+# ================== PLANS ==================
+PLANS = {
+    "1": {"days": 1, "stars": 550, "crypto": 5},
+    "7": {"days": 7, "stars": 770, "crypto": 7},
+    "30": {"days": 30, "stars": 1100, "crypto": 10},
+}
 
 # ================== KEYBOARDS ==================
 def menu():
@@ -67,18 +74,6 @@ def menu():
         ]
     ])
 
-
-def back_info():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="info")]
-    ])
-
-
-def back_main():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
-    ])
-
 # ================== START ==================
 @router.message(CommandStart())
 async def start(message: Message):
@@ -90,171 +85,162 @@ async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=menu())
     await call.answer()
 
+# ================== STARS ==================
+@router.callback_query(F.data == "stars")
+async def stars(call: CallbackQuery):
+    await call.message.edit_text(
+        "⭐ Stars оплата\n\nВыбери тариф:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="1 день", callback_data="stars:1")],
+            [InlineKeyboardButton(text="7 дней", callback_data="stars:7")],
+            [InlineKeyboardButton(text="30 дней", callback_data="stars:30")],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
+        ])
+    )
+    await call.answer()
+
+# ================== CRYPTO ==================
+@router.callback_query(F.data == "crypto")
+async def crypto(call: CallbackQuery):
+    await call.message.edit_text(
+        "💰 Crypto оплата\n\nВыбери тариф:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="1 день", callback_data="crypto:1")],
+            [InlineKeyboardButton(text="7 дней", callback_data="crypto:7")],
+            [InlineKeyboardButton(text="30 дней", callback_data="crypto:30")],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
+        ])
+    )
+    await call.answer()
+
+# ================== STARS PLAN ==================
+@router.callback_query(F.data.startswith("stars:"))
+async def stars_plan(call: CallbackQuery):
+    plan = call.data.split(":")[1]
+
+    await call.message.edit_text(
+        f"⭐ {plan} дней — {PLANS[plan]['stars']}⭐",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Оплатить", callback_data=f"pay:stars:{plan}")],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
+        ])
+    )
+    await call.answer()
+
+# ================== CRYPTO PLAN ==================
+@router.callback_query(F.data.startswith("crypto:"))
+async def crypto_plan(call: CallbackQuery):
+    plan = call.data.split(":")[1]
+
+    await call.message.edit_text(
+        f"💰 {plan} дней — {PLANS[plan]['crypto']} USDT",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Оплатить", callback_data=f"pay:crypto:{plan}")],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="crypto")]
+        ])
+    )
+    await call.answer()
+
+# ================== REF SYSTEM ==================
+@router.callback_query(F.data == "ref")
+async def ref(call: CallbackQuery):
+    user_id = call.from_user.id
+    link = f"https://t.me/{(await bot.get_me()).username}?start={user_id}"
+
+    cursor.execute("SELECT COUNT(*) FROM referrals WHERE user_id=?", (user_id,))
+    count = cursor.fetchone()[0]
+
+    text = (
+        "👥 РЕФЕРАЛЬНАЯ СИСТЕМА\n\n"
+        "💡 Получи +7 дней:\n"
+        "— у тебя должна быть подписка\n"
+        "— пригласи друга\n"
+        "— он оплачивает доступ\n\n"
+        f"🔗 Ссылка:\n{link}\n\n"
+        f"👤 Приглашено: {count}"
+    )
+
+    await call.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
+        ])
+    )
+    await call.answer()
+
 # ================== INFO ==================
 @router.callback_query(F.data == "info")
 async def info(call: CallbackQuery):
-    text = "ℹ️ ИНФОРМАЦИЯ\n\nВыбери раздел 👇"
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🛠 Поддержка", callback_data="support")],
-        [InlineKeyboardButton(text="📄 Политика конфиденциальности", callback_data="privacy")],
-        [InlineKeyboardButton(text="📜 Пользовательское соглашение", callback_data="terms")],
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
-    ])
-
-    await call.message.edit_text(text, reply_markup=kb)
+    await call.message.edit_text(
+        "ℹ️ ИНФОРМАЦИЯ\n\nВыбери раздел 👇",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🛠 Поддержка", callback_data="support")],
+            [InlineKeyboardButton(text="📄 Политика конфиденциальности", callback_data="privacy")],
+            [InlineKeyboardButton(text="📜 Пользовательское соглашение", callback_data="terms")],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
+        ])
+    )
     await call.answer()
 
 # ================== SUPPORT ==================
 @router.callback_query(F.data == "support")
 async def support(call: CallbackQuery):
-    text = "🛠 ПОДДЕРЖКА\n\n👉 https://t.me/mistybibi"
-    await call.message.edit_text(text, reply_markup=back_info())
+    await call.message.edit_text(
+        "🛠 ПОДДЕРЖКА\n\n👉 https://t.me/mistybibi",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="info")]
+        ])
+    )
     await call.answer()
 
-# ================== PRIVACY (ПОЛНЫЙ ТЕКСТ) ==================
+# ================== PRIVACY ==================
 @router.callback_query(F.data == "privacy")
 async def privacy(call: CallbackQuery):
     text = """Политика конфиденциальности
 Platega • 1 апреля в 20:29
+
 Данная Политика конфиденциальности регламентирует сбор идентификаторов аккаунта, технической информации и истории взаимодействий для обеспечения работы сервиса, связи с пользователем и аналитики. Передача данных третьим лицам допускается только по закону, для выполнения обязательств или с согласия пользователя.
 Администрация хранит информацию необходимый срок, применяет разумные меры защиты, но не гарантирует абсолютной безопасности. Пользователь自行承担 риски передачи данных и принимает любые изменения в политике, продолжая использовать сервис.
-Cocoon AI Summary
-Политика конфиденциальности регулирует сбор, использование и защиту информации пользователей сервиса. Собираются идентификаторы аккаунта, техническая информация и история взаимодействий. Данные используются для обеспечения работы сервиса, связи с пользователем и анализа. Передача информации третьим лицам возможна только в законодательно установленных случаях или с согласия пользователя. Хранение данных осуществляется в течение необходимого срока, их защита — в разумных пределах. Пользователь самостоятельно несёт ответственность за риски, связанные с передачей данных. Администрация вправе вносить изменения в Политику без уведомления — согласие считается принятым при дальнейшем использовании сервиса.
-
-
 
 1. Общие положения
-
-1.1. Настоящая Политика конфиденциальности (далее — «Политика») регулирует порядок обработки и защиты информации, которую Пользователь передаёт при использовании сервиса (далее — «Сервис»).
-
-1.2. Используя Сервис, Пользователь подтверждает своё согласие с условиями Политики. Если Пользователь не согласен с условиями — он обязан прекратить использование Сервиса.
-
-
-
 2. Сбор информации
-
-2.1. Сервис может собирать следующие типы данных:
-
-идентификаторы аккаунта (логин, ID, никнейм и т.п.);
-техническую информацию (IP-адрес, данные о браузере, устройстве и операционной системе);
-историю взаимодействий с Сервисом.
-
-2.2. Сервис не требует от Пользователя предоставления паспортных данных, документов, фотографий или другой личной информации, кроме минимально необходимой для работы.
-
-
-
 3. Использование информации
-
-3.1. Сервис может использовать полученную информацию исключительно для:
-
-обеспечения работы функционала;
-связи с Пользователем (в том числе для уведомлений и поддержки);
-анализа и улучшения работы Сервиса.
-
-
-
-4. Передача информации третьим лицам
-
-4.1. Администрация не передаёт полученные данные третьим лицам, за исключением случаев:
-
-если это требуется по закону;
-если это необходимо для исполнения обязательств перед Пользователем;
-если Пользователь сам дал на это согласие.
-
-
-
-5. Хранение и защита данных
-
-5.1. Данные хранятся в течение срока, необходимого для достижения целей обработки.
-
-5.2. Администрация принимает разумные меры для защиты данных, но не гарантирует абсолютную безопасность информации при передаче через интернет.
-
-
-
+4. Передача информации
+5. Хранение и защита
 6. Отказ от ответственности
+7. Изменения"""
 
-6.1. Пользователь понимает и соглашается, что передача информации через интернет всегда сопряжена с рисками.
-
-6.2. Администрация не несёт ответственности за утрату, кражу или раскрытие данных.
-
-
-
-7. Изменения в Политике
-
-7.1. Администрация вправе изменять условия Политики без предварительного уведомления.
-
-7.2. Продолжение использования Сервиса означает согласие с новой редакцией Политики."""
-
-    await call.message.edit_text(text, reply_markup=back_info())
+    await call.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="info")]
+        ])
+    )
     await call.answer()
 
-# ================== TERMS (ПОЛНЫЙ ТЕКСТ) ==================
+# ================== TERMS ==================
 @router.callback_query(F.data == "terms")
 async def terms(call: CallbackQuery):
     text = """Пользовательское соглашение
 Platega • 1 апреля в 20:30
 
 1. Общие положения
-1.1. Настоящее Пользовательское соглашение (далее — «Соглашение») регулирует порядок использования онлайн-сервиса (далее — «Сервис»), предоставляемого Администрацией.
-
-1.2. Используя Сервис, включая запуск бота, регистрацию, оплату услуг или получение доступа к материалам, Пользователь подтверждает, что полностью ознакомился с условиями настоящего Соглашения и принимает их в полном объёме.
-
-1.3. В случае несогласия с условиями Соглашения Пользователь обязан прекратить использование Сервиса.
-
-
-
-2. Характер услуг и цифровых товаров
-2.1. Сервис предоставляет цифровые товары и услуги нематериального характера.
-
-2.2. Материалы могут включать:
-информацию, авторский контент, аналитику.
-
-2.3. Ценность заключается в подаче и системе, а не в отдельных данных.
-
-
-
+2. Услуги
 3. Отказ от гарантий
-3.1. Сервис предоставляется «как есть».
-
-3.2. Результаты не гарантируются.
-
-
-
-4. Законность использования
-4.1. Пользователь обязан соблюдать закон.
-
-
-
+4. Законность
 5. Интеллектуальная собственность
-5.1. Запрещено копирование и распространение материалов.
-
-
-
 6. Ограничение доступа
-6.1. Доступ может быть ограничен при нарушениях.
-
-
-
 7. Платежи и возвраты
-7.1. Возвраты ограничены и рассматриваются индивидуально.
-
-
-
 8. Конфиденциальность
-8.1. Данные обрабатываются в минимальном объёме.
+9. Изменения
+10. Контакты"""
 
-
-
-9. Изменение условий
-9.1. Условия могут обновляться.
-
-
-
-10. Контакты
-10.1. Поддержка через бот."""
-
-    await call.message.edit_text(text, reply_markup=back_info())
+    await call.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="info")]
+        ])
+    )
     await call.answer()
 
 # ================== RUN ==================
