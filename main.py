@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ContentType, InlineKeyboardButton, InlineKeyboardMarkup
-from aiogram.utils import executor
+from 
 
 
 logging.basicConfig(level=logging.INFO)
@@ -1567,5 +1567,6 @@ async def debug(message: types.Message):
     await message.answer(f"CHAT ID: {message.chat.id}")
 
 
-if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
+    if __name__ == '__main__':
+    executor.start_polling(dp, skip_updates=True)
