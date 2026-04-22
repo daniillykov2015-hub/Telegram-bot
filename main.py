@@ -4,6 +4,8 @@ import os
 import sqlite3
 from datetime import datetime, timedelta
 
+import requests
+
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import CommandStart
 from aiogram.types import (
@@ -11,7 +13,8 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
-    LabeledPrice
+    LabeledPrice,
+    PreCheckoutQuery
 )
 
 # ================== CONFIG ==================
@@ -95,6 +98,20 @@ async def grant_access(user_id: int, days: int):
         logging.error(f"ACCESS ERROR: {e}")
 
 
+# ================== CRYPTO CHECK ==================
+def check_crypto_invoice(invoice_id: str):
+    url = "https://pay.crypt.bot/api/getInvoices"
+    headers = {"Crypto-Pay-API-Token": CRYPTO_TOKEN}
+
+    try:
+        r = requests.post(url, headers=headers, json={"invoice_ids": invoice_id})
+        data = r.json()
+        return data["result"]["items"][0]["status"] == "paid"
+    except Exception as e:
+        logging.error(f"CRYPTO CHECK ERROR: {e}")
+        return False
+
+
 # ================== KEYBOARDS ==================
 def main_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -118,12 +135,6 @@ def pay_kb(prefix: str, plan: str):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💳 Оплатить", callback_data=f"pay_{prefix}_{plan}")],
         [InlineKeyboardButton(text="⬅ Назад", callback_data=prefix)]
-    ])
-
-
-def back_kb():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
 
 
@@ -204,25 +215,49 @@ async def pay_stars(call: CallbackQuery):
         prices=[LabeledPrice(label="Access", amount=data["stars"])]
     )
 
-    # 🔥 ВАЖНО: сразу фиксируем доступ (MVP-логика)
-    await grant_access(call.from_user.id, data["days"])
-
     await call.answer()
 
 
-# ================== CRYPTO ==================
+# ================== STARS CONFIRM ==================
+@router.pre_checkout_query()
+async def pre_checkout(pre: PreCheckoutQuery):
+    await pre.answer(ok=True)
+
+
+@router.message(F.successful_payment)
+async def success_payment(message: Message):
+    payload = message.successful_payment.invoice_payload
+
+    if payload.startswith("stars_"):
+        plan = payload.split("_")[1]
+        await grant_access(message.from_user.id, PLANS[plan]["days"])
+
+
+# ================== CRYPTO PAYMENT ==================
 @router.callback_query(F.data.startswith("pay_crypto_"))
 async def pay_crypto(call: CallbackQuery):
     plan = call.data.split("_")[2]
     data = PLANS[plan]
 
+    # временная заглушка инвойса (если у тебя уже есть create_invoice — подключишь)
+    invoice_id = f"inv_{call.from_user.id}_{plan}"
+
+    cursor.execute(
+        "INSERT INTO payments VALUES (?, ?, ?, ?)",
+        (invoice_id, call.from_user.id, data["days"], "pending")
+    )
+    conn.commit()
+
     await call.message.answer(
-        f"💰 Оплата: {data['crypto']} USDT\nСсылка на оплату будет здесь",
-        reply_markup=back_kb()
+        "💰 Проверяем оплату...",
     )
 
-    # 🔥 тоже фиксируем доступ (пока MVP)
-    await grant_access(call.from_user.id, data["days"])
+    await asyncio.sleep(10)
+
+    if check_crypto_invoice(invoice_id):
+        await grant_access(call.from_user.id, data["days"])
+    else:
+        await call.message.answer("⏳ Оплата не найдена")
 
     await call.answer()
 
