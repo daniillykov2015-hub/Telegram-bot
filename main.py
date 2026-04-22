@@ -5,6 +5,8 @@ import requests
 import sqlite3
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.filters import Command
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
