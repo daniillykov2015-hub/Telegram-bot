@@ -20,29 +20,12 @@ from aiogram.types import (
 # ================== CONFIG ==================
 logging.basicConfig(level=logging.INFO)
 
-
-# ================== SAFE ENV SYSTEM ==================
-def require_env(name: str, value: str | None, allow_int: bool = False):
-    if not value:
-        logging.error(f"❌ ENV ERROR: {name} не задан")
-        return None
-
-    if allow_int:
-        try:
-            return int(value)
-        except ValueError:
-            logging.error(f"❌ ENV ERROR: {name} должен быть числом: {value}")
-            return None
-
-    return value
-
-
-BOT_TOKEN = require_env("TELEGRAM_BOT_TOKEN", os.getenv("TELEGRAM_BOT_TOKEN"))
-GROUP_ID = require_env("TELEGRAM_GROUP_ID", os.getenv("TELEGRAM_GROUP_ID"), allow_int=True)
-CRYPTO_TOKEN = require_env("CRYPTO_TOKEN", os.getenv("CRYPTO_TOKEN"))
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+GROUP_ID = int(os.getenv("TELEGRAM_GROUP_ID", "0"))
+CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
 
 if not BOT_TOKEN or not GROUP_ID or not CRYPTO_TOKEN:
-    raise RuntimeError("❌ Бот не запущен: проверь TELEGRAM_BOT_TOKEN / TELEGRAM_GROUP_ID / CRYPTO_TOKEN")
+    raise RuntimeError("❌ Missing ENV variables")
 
 
 bot = Bot(token=BOT_TOKEN)
@@ -82,97 +65,110 @@ PLANS = {
 }
 
 
-# ================== ACCESS SYSTEM ==================
+# ================== ACCESS ==================
 async def grant_access(user_id: int, days: int):
     expire = datetime.utcnow() + timedelta(days=days)
 
     cursor.execute(
-        "INSERT OR REPLACE INTO users (user_id, expire_date) VALUES (?, ?)",
+        "INSERT OR REPLACE INTO users VALUES (?, ?)",
         (user_id, expire.isoformat())
     )
     conn.commit()
 
     try:
-        await bot.send_message(user_id, f"✅ Доступ активирован на {days} дней!")
-    except Exception as e:
-        logging.error(f"ACCESS ERROR: {e}")
+        await bot.send_message(user_id, f"✅ Доступ активирован на {days} дней")
+    except:
+        pass
 
 
-# ================== CRYPTO CHECK ==================
-def check_crypto_invoice(invoice_id: str):
+async def has_access(user_id: int):
+    cursor.execute("SELECT expire_date FROM users WHERE user_id=?", (user_id,))
+    row = cursor.fetchone()
+
+    if not row:
+        return False
+
+    return datetime.fromisoformat(row[0]) > datetime.utcnow()
+
+
+# ================== CRYPTO CHECK LOOP ==================
+def crypto_status(invoice_id: str):
     url = "https://pay.crypt.bot/api/getInvoices"
     headers = {"Crypto-Pay-API-Token": CRYPTO_TOKEN}
 
     try:
         r = requests.post(url, headers=headers, json={"invoice_ids": invoice_id})
         data = r.json()
-        return data["result"]["items"][0]["status"] == "paid"
-    except Exception as e:
-        logging.error(f"CRYPTO CHECK ERROR: {e}")
-        return False
+        return data["result"]["items"][0]["status"]
+    except:
+        return None
+
+
+async def wait_crypto_payment(invoice_id: str, user_id: int, days: int):
+    for _ in range(20):  # ~2 минуты ожидания
+        status = crypto_status(invoice_id)
+
+        if status == "paid":
+            await grant_access(user_id, days)
+            return True
+
+        if status == "expired":
+            return False
+
+        await asyncio.sleep(6)
+
+    return False
 
 
 # ================== KEYBOARDS ==================
 def main_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="⭐ Stars", callback_data="stars"),
-            InlineKeyboardButton(text="💰 Crypto", callback_data="crypto"),
+            InlineKeyboardButton("⭐ Stars", callback_data="stars"),
+            InlineKeyboardButton("💰 Crypto", callback_data="crypto"),
         ]
     ])
 
 
 def plan_kb(prefix: str):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="1 день", callback_data=f"{prefix}_1")],
-        [InlineKeyboardButton(text="7 дней", callback_data=f"{prefix}_7")],
-        [InlineKeyboardButton(text="30 дней", callback_data=f"{prefix}_30")],
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
+        [InlineKeyboardButton("1 день", callback_data=f"{prefix}_1")],
+        [InlineKeyboardButton("7 дней", callback_data=f"{prefix}_7")],
+        [InlineKeyboardButton("30 дней", callback_data=f"{prefix}_30")],
+        [InlineKeyboardButton("⬅ Назад", callback_data="back")]
     ])
 
 
 def pay_kb(prefix: str, plan: str):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Оплатить", callback_data=f"pay_{prefix}_{plan}")],
-        [InlineKeyboardButton(text="⬅ Назад", callback_data=prefix)]
+        [InlineKeyboardButton("💳 Оплатить", callback_data=f"pay_{prefix}_{plan}")],
+        [InlineKeyboardButton("⬅ Назад", callback_data=prefix)]
     ])
 
 
 # ================== START ==================
 @router.message(CommandStart())
 async def start(message: Message):
-    await message.answer(
-        "👋 Добро пожаловать!\nВыбери способ оплаты:",
-        reply_markup=main_menu()
-    )
+    await message.answer("👋 Выбери оплату:", reply_markup=main_menu())
 
 
 # ================== BACK ==================
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
-    await call.message.edit_text(
-        "Главное меню:",
-        reply_markup=main_menu()
-    )
+    await call.message.edit_text("Главное меню", reply_markup=main_menu())
     await call.answer()
 
 
 # ================== MENUS ==================
 @router.callback_query(F.data == "stars")
 async def stars(call: CallbackQuery):
-    await call.message.edit_text(
-        "⭐ Выбери тариф Stars:",
-        reply_markup=plan_kb("stars")
-    )
+    await call.message.edit_text("⭐ Stars тарифы", reply_markup=plan_kb("stars"))
     await call.answer()
 
 
 @router.callback_query(F.data == "crypto")
 async def crypto(call: CallbackQuery):
-    await call.message.edit_text(
-        "💰 Выбери тариф Crypto:",
-        reply_markup=plan_kb("crypto")
-    )
+    await call.message.edit_text("💰 Crypto тарифы", reply_markup=plan_kb("crypto"))
     await call.answer()
 
 
@@ -182,7 +178,7 @@ async def stars_plan(call: CallbackQuery):
     plan = call.data.split("_")[1]
 
     await call.message.edit_text(
-        f"⭐ {plan} дней\nЦена: {PLANS[plan]['stars']}⭐",
+        f"⭐ {plan} дней — {PLANS[plan]['stars']}⭐",
         reply_markup=pay_kb("stars", plan)
     )
     await call.answer()
@@ -193,13 +189,13 @@ async def crypto_plan(call: CallbackQuery):
     plan = call.data.split("_")[1]
 
     await call.message.edit_text(
-        f"💰 {plan} дней\nЦена: {PLANS[plan]['crypto']} USDT",
+        f"💰 {plan} дней — {PLANS[plan]['crypto']} USDT",
         reply_markup=pay_kb("crypto", plan)
     )
     await call.answer()
 
 
-# ================== STARS PAYMENT ==================
+# ================== STARS ==================
 @router.callback_query(F.data.startswith("pay_stars_"))
 async def pay_stars(call: CallbackQuery):
     plan = call.data.split("_")[2]
@@ -207,18 +203,17 @@ async def pay_stars(call: CallbackQuery):
 
     await bot.send_invoice(
         chat_id=call.message.chat.id,
-        title=f"{data['days']} дней доступа",
-        description="Stars оплата",
+        title="Access",
+        description="Stars payment",
         payload=f"stars_{plan}",
         provider_token="",
         currency="XTR",
-        prices=[LabeledPrice(label="Access", amount=data["stars"])]
+        prices=[LabeledPrice("Access", data["stars"])]
     )
 
     await call.answer()
 
 
-# ================== STARS CONFIRM ==================
 @router.pre_checkout_query()
 async def pre_checkout(pre: PreCheckoutQuery):
     await pre.answer(ok=True)
@@ -233,14 +228,13 @@ async def success_payment(message: Message):
         await grant_access(message.from_user.id, PLANS[plan]["days"])
 
 
-# ================== CRYPTO PAYMENT ==================
+# ================== CRYPTO ==================
 @router.callback_query(F.data.startswith("pay_crypto_"))
 async def pay_crypto(call: CallbackQuery):
     plan = call.data.split("_")[2]
     data = PLANS[plan]
 
-    # временная заглушка инвойса (если у тебя уже есть create_invoice — подключишь)
-    invoice_id = f"inv_{call.from_user.id}_{plan}"
+    invoice_id = f"{call.from_user.id}_{plan}_{int(datetime.utcnow().timestamp())}"
 
     cursor.execute(
         "INSERT INTO payments VALUES (?, ?, ?, ?)",
@@ -248,16 +242,12 @@ async def pay_crypto(call: CallbackQuery):
     )
     conn.commit()
 
-    await call.message.answer(
-        "💰 Проверяем оплату...",
-    )
+    await call.message.answer("💰 Проверяем оплату...")
 
-    await asyncio.sleep(10)
+    success = await wait_crypto_payment(invoice_id, call.from_user.id, data["days"])
 
-    if check_crypto_invoice(invoice_id):
-        await grant_access(call.from_user.id, data["days"])
-    else:
-        await call.message.answer("⏳ Оплата не найдена")
+    if not success:
+        await call.message.answer("⏳ Оплата не найдена / не подтверждена")
 
     await call.answer()
 
