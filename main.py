@@ -16,30 +16,37 @@ from aiogram.types import (
 # ================== CONFIG ==================
 logging.basicConfig(level=logging.INFO)
 
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-GROUP_ID_RAW = os.getenv("TELEGRAM_GROUP_ID")
-CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
 
-# --- SAFE CHECKS ---
-if not BOT_TOKEN:
-    raise ValueError("TELEGRAM_BOT_TOKEN не задан")
+# ================== SAFE ENV SYSTEM ==================
+def require_env(name: str, value: str | None, allow_int: bool = False):
+    if not value:
+        logging.error(f"❌ ENV ERROR: {name} не задан")
+        return None
 
-if not GROUP_ID_RAW:
-    raise ValueError("TELEGRAM_GROUP_ID не задан")
+    if allow_int:
+        try:
+            return int(value)
+        except ValueError:
+            logging.error(f"❌ ENV ERROR: {name} должен быть числом: {value}")
+            return None
 
-try:
-    GROUP_ID = int(GROUP_ID_RAW)
-except ValueError:
-    raise ValueError("TELEGRAM_GROUP_ID должен быть числом вида -100xxxxxxxxxx")
+    return value
 
-if not CRYPTO_TOKEN:
-    raise ValueError("CRYPTO_TOKEN не задан")
+
+BOT_TOKEN = require_env("TELEGRAM_BOT_TOKEN", os.getenv("TELEGRAM_BOT_TOKEN"))
+GROUP_ID = require_env("TELEGRAM_GROUP_ID", os.getenv("TELEGRAM_GROUP_ID"), allow_int=True)
+CRYPTO_TOKEN = require_env("CRYPTO_TOKEN", os.getenv("CRYPTO_TOKEN"))
+
+
+if not BOT_TOKEN or not GROUP_ID or not CRYPTO_TOKEN:
+    raise RuntimeError("❌ Бот не запущен: проверь TELEGRAM_BOT_TOKEN / TELEGRAM_GROUP_ID / CRYPTO_TOKEN")
 
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 router = Router()
 dp.include_router(router)
+
 
 # ================== DB ==================
 conn = sqlite3.connect("users.db")
@@ -63,12 +70,14 @@ CREATE TABLE IF NOT EXISTS payments (
 
 conn.commit()
 
+
 # ================== PRICES ==================
 PLANS = {
     "1": {"days": 1, "stars": 550, "crypto": 5},
     "7": {"days": 7, "stars": 770, "crypto": 7},
     "30": {"days": 30, "stars": 1100, "crypto": 10},
 }
+
 
 # ================== KEYBOARDS ==================
 def main_menu():
@@ -101,6 +110,7 @@ def back_kb():
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
 
+
 # ================== START ==================
 @router.message(CommandStart())
 async def start(message: Message):
@@ -108,6 +118,7 @@ async def start(message: Message):
         "👋 Добро пожаловать!\nВыбери способ оплаты:",
         reply_markup=main_menu()
     )
+
 
 # ================== BACK ==================
 @router.callback_query(F.data == "back")
@@ -118,6 +129,7 @@ async def back(call: CallbackQuery):
     )
     await call.answer()
 
+
 # ================== MENUS ==================
 @router.callback_query(F.data == "stars")
 async def stars(call: CallbackQuery):
@@ -127,6 +139,7 @@ async def stars(call: CallbackQuery):
     )
     await call.answer()
 
+
 @router.callback_query(F.data == "crypto")
 async def crypto(call: CallbackQuery):
     await call.message.edit_text(
@@ -135,7 +148,8 @@ async def crypto(call: CallbackQuery):
     )
     await call.answer()
 
-# ================== PLAN ==================
+
+# ================== PLANS ==================
 @router.callback_query(F.data.startswith("stars_"))
 async def stars_plan(call: CallbackQuery):
     plan = call.data.split("_")[1]
@@ -146,6 +160,7 @@ async def stars_plan(call: CallbackQuery):
     )
     await call.answer()
 
+
 @router.callback_query(F.data.startswith("crypto_"))
 async def crypto_plan(call: CallbackQuery):
     plan = call.data.split("_")[1]
@@ -155,6 +170,7 @@ async def crypto_plan(call: CallbackQuery):
         reply_markup=pay_kb("crypto", plan)
     )
     await call.answer()
+
 
 # ================== STARS PAYMENT ==================
 @router.callback_query(F.data.startswith("pay_stars_"))
@@ -174,6 +190,7 @@ async def pay_stars(call: CallbackQuery):
 
     await call.answer()
 
+
 # ================== CRYPTO ==================
 @router.callback_query(F.data.startswith("pay_crypto_"))
 async def pay_crypto(call: CallbackQuery):
@@ -181,15 +198,17 @@ async def pay_crypto(call: CallbackQuery):
     data = PLANS[plan]
 
     await call.message.answer(
-        f"💰 Оплата: {data['crypto']} USDT\n(инвойс логика подключается отдельно)",
+        f"💰 Оплата: {data['crypto']} USDT\nСсылка на оплату будет здесь",
         reply_markup=back_kb()
     )
 
     await call.answer()
 
+
 # ================== RUN ==================
 async def main():
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
