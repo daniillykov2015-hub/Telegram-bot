@@ -62,6 +62,9 @@ def menu():
         ],
         [
             InlineKeyboardButton(text="👥 Реферальная система", callback_data="ref")
+        ],
+        [
+            InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")
         ]
     ])
 
@@ -71,64 +74,18 @@ def back_kb():
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
 
-
-def plans(prefix):
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="1 день", callback_data=f"{prefix}:1")],
-        [InlineKeyboardButton(text="7 дней", callback_data=f"{prefix}:7")],
-        [InlineKeyboardButton(text="30 дней", callback_data=f"{prefix}:30")],
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
-    ])
-
-
-def pay_kb(prefix, plan):
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Оплатить", callback_data=f"pay:{prefix}:{plan}")],
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
-    ])
-
 # ================== START ==================
 @router.message(CommandStart())
 async def start(message: Message):
     await message.answer(MAIN_TEXT, reply_markup=menu())
 
-# ================== SAFE NAV ==================
-async def swap(call: CallbackQuery, markup):
-    try:
-        await call.message.edit_reply_markup(reply_markup=markup)
-    except:
-        pass
-    await call.answer()
-
-# ================== BACK (ФИКС) ==================
+# ================== BACK ==================
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=menu())
     await call.answer()
 
-# ================== MENU ==================
-@router.callback_query(F.data == "stars")
-async def stars(call: CallbackQuery):
-    await swap(call, plans("stars"))
-
-
-@router.callback_query(F.data == "crypto")
-async def crypto(call: CallbackQuery):
-    await swap(call, plans("crypto"))
-
-# ================== PLANS ==================
-@router.callback_query(F.data.startswith("stars:"))
-async def stars_plan(call: CallbackQuery):
-    plan = call.data.split(":")[1]
-    await swap(call, pay_kb("stars", plan))
-
-
-@router.callback_query(F.data.startswith("crypto:"))
-async def crypto_plan(call: CallbackQuery):
-    plan = call.data.split(":")[1]
-    await swap(call, pay_kb("crypto", plan))
-
-# ================== REF SYSTEM (ИСПРАВЛЕНО ПОЛНОСТЬЮ) ==================
+# ================== REF SYSTEM ==================
 @router.callback_query(F.data == "ref")
 async def ref(call: CallbackQuery):
     user_id = call.from_user.id
@@ -152,60 +109,66 @@ async def ref(call: CallbackQuery):
         f"👤 Приглашено: {count}"
     )
 
+    await call.message.edit_text(text, reply_markup=back_kb())
+    await call.answer()
+
+# ================== INFO MENU ==================
+@router.callback_query(F.data == "info")
+async def info(call: CallbackQuery):
+    text = (
+        "ℹ️ ИНФОРМАЦИЯ\n\n"
+        "Выбери раздел 👇"
+    )
+
     kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🛠 Поддержка", callback_data="support")],
+        [InlineKeyboardButton(text="📄 Политика конфиденциальности", callback_data="privacy")],
+        [InlineKeyboardButton(text="📜 Пользовательское соглашение", callback_data="terms")],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
 
     await call.message.edit_text(text, reply_markup=kb)
     await call.answer()
 
-# ================== REF LOGIC ==================
-@router.message(CommandStart(deep_link=True))
-async def referral_start(message: Message):
-    args = message.text.split()
+# ================== SUPPORT ==================
+@router.callback_query(F.data == "support")
+async def support(call: CallbackQuery):
+    text = (
+        "🛠 ПОДДЕРЖКА\n\n"
+        "Связь с админом:\n"
+        "👉 https://t.me/mistybibi"
+    )
 
-    if len(args) > 1:
-        ref_id = int(args[1])
-        user_id = message.from_user.id
+    await call.message.edit_text(text, reply_markup=back_kb())
+    await call.answer()
 
-        if ref_id == user_id:
-            return
+# ================== PRIVACY POLICY ==================
+@router.callback_query(F.data == "privacy")
+async def privacy(call: CallbackQuery):
+    text = (
+        "📄 ПОЛИТИКА КОНФИДЕНЦИАЛЬНОСТИ\n\n"
+        "Данные используются только для работы сервиса.\n"
+        "Передача третьим лицам — только по закону.\n\n"
+        "Пользователь принимает риски передачи данных.\n"
+        "Администрация может менять политику без уведомления.\n"
+    )
 
-        cursor.execute(
-            "SELECT 1 FROM referrals WHERE referred_id=?",
-            (user_id,)
-        )
-        if cursor.fetchone():
-            return
+    await call.message.edit_text(text, reply_markup=back_kb())
+    await call.answer()
 
-        cursor.execute(
-            "INSERT INTO referrals VALUES (?, ?)",
-            (ref_id, user_id)
-        )
-        conn.commit()
+# ================== TERMS ==================
+@router.callback_query(F.data == "terms")
+async def terms(call: CallbackQuery):
+    text = (
+        "📜 ПОЛЬЗОВАТЕЛЬСКОЕ СОГЛАШЕНИЕ\n\n"
+        "Сервис предоставляется как есть.\n"
+        "Возвраты не предусмотрены.\n"
+        "Администрация не гарантирует результат.\n\n"
+        "Используя сервис — вы соглашаетесь с условиями."
+    )
 
-        now = datetime.utcnow()
-        cursor.execute("SELECT expire_date FROM users WHERE user_id=?", (ref_id,))
-        row = cursor.fetchone()
-
-        bonus = timedelta(days=7)
-
-        if row and row[0]:
-            exp = datetime.fromisoformat(row[0])
-            new_exp = exp + bonus if exp > now else now + bonus
-        else:
-            new_exp = now + bonus
-
-        cursor.execute(
-            "INSERT OR REPLACE INTO users VALUES (?, ?)",
-            (ref_id, new_exp.isoformat())
-        )
-        conn.commit()
-
-        try:
-            await bot.send_message(ref_id, "🎉 +7 дней за друга начислено!")
-        except:
-            pass
+    await call.message.edit_text(text, reply_markup=back_kb())
+    await call.answer()
 
 # ================== RUN ==================
 async def main():
