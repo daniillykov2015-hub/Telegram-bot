@@ -21,7 +21,7 @@ from aiogram.types import (
 logging.basicConfig(level=logging.INFO)
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-GROUP_ID = int(os.getenv("TELEGRAM_GROUP_ID", "0"))  # закрытый канал/группа
+GROUP_ID = int(os.getenv("TELEGRAM_GROUP_ID", "0"))
 CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
 
 if not BOT_TOKEN or not GROUP_ID or not CRYPTO_TOKEN:
@@ -31,7 +31,6 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 router = Router()
 dp.include_router(router)
-
 
 # ================== DB ==================
 conn = sqlite3.connect("users.db")
@@ -55,16 +54,14 @@ CREATE TABLE IF NOT EXISTS payments (
 
 conn.commit()
 
-
-# ================== PRICES ==================
+# ================== PLANS ==================
 PLANS = {
     "1": {"days": 1, "stars": 550, "crypto": 5},
     "7": {"days": 7, "stars": 770, "crypto": 7},
     "30": {"days": 30, "stars": 1100, "crypto": 10},
 }
 
-
-# ================== ACCESS SYSTEM ==================
+# ================== ACCESS ==================
 async def grant_access(user_id: int, days: int):
     expire = datetime.utcnow() + timedelta(days=days)
 
@@ -75,34 +72,9 @@ async def grant_access(user_id: int, days: int):
     conn.commit()
 
     try:
-        await bot.approve_chat_join_request(GROUP_ID, user_id)
-    except:
-        pass
-
-    try:
         await bot.send_message(user_id, f"✅ Доступ активирован на {days} дней")
     except:
         pass
-
-
-async def revoke_access(user_id: int):
-    try:
-        await bot.ban_chat_member(GROUP_ID, user_id)
-        await bot.unban_chat_member(GROUP_ID, user_id)
-    except:
-        pass
-
-
-async def check_expired():
-    while True:
-        cursor.execute("SELECT user_id, expire_date FROM users")
-        rows = cursor.fetchall()
-
-        for user_id, exp in rows:
-            if datetime.fromisoformat(exp) < datetime.utcnow():
-                await revoke_access(user_id)
-
-        await asyncio.sleep(60)
 
 
 async def has_access(user_id: int):
@@ -114,59 +86,29 @@ async def has_access(user_id: int):
 
     return datetime.fromisoformat(row[0]) > datetime.utcnow()
 
-
-# ================== CRYPTO ==================
-def crypto_status(invoice_id: str):
-    url = "https://pay.crypt.bot/api/getInvoices"
-    headers = {"Crypto-Pay-API-Token": CRYPTO_TOKEN}
-
-    try:
-        r = requests.post(url, headers=headers, json={"invoice_ids": invoice_id})
-        data = r.json()
-        return data["result"]["items"][0]["status"]
-    except:
-        return None
-
-
-async def wait_crypto(invoice_id: str, user_id: int, days: int):
-    for _ in range(20):
-        status = crypto_status(invoice_id)
-
-        if status == "paid":
-            await grant_access(user_id, days)
-            return True
-
-        if status == "expired":
-            return False
-
-        await asyncio.sleep(6)
-
-    return False
-
-
-# ================== KEYBOARDS ==================
+# ================== KEYBOARDS (FIXED v3) ==================
 def menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton("⭐ Stars", callback_data="stars"),
-            InlineKeyboardButton("💰 Crypto", callback_data="crypto"),
+            InlineKeyboardButton(text="⭐ Stars", callback_data="stars"),
+            InlineKeyboardButton(text="💰 Crypto", callback_data="crypto"),
         ]
     ])
 
 
-def plans(prefix: str):
+def plan_kb(prefix: str):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton("1 день", callback_data=f"{prefix}_1")],
-        [InlineKeyboardButton("7 дней", callback_data=f"{prefix}_7")],
-        [InlineKeyboardButton("30 дней", callback_data=f"{prefix}_30")],
-        [InlineKeyboardButton("⬅ Назад", callback_data="back")]
+        [InlineKeyboardButton(text="1 день", callback_data=f"{prefix}_1")],
+        [InlineKeyboardButton(text="7 дней", callback_data=f"{prefix}_7")],
+        [InlineKeyboardButton(text="30 дней", callback_data=f"{prefix}_30")],
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
 
 
-def pay(prefix: str, plan: str):
+def pay_kb(prefix: str, plan: str):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton("💳 Оплатить", callback_data=f"pay_{prefix}_{plan}")],
-        [InlineKeyboardButton("⬅ Назад", callback_data=prefix)]
+        [InlineKeyboardButton(text="💳 Оплатить", callback_data=f"pay_{prefix}_{plan}")],
+        [InlineKeyboardButton(text="⬅ Назад", callback_data=prefix)]
     ])
 
 
@@ -186,13 +128,13 @@ async def back(call: CallbackQuery):
 # ================== MENUS ==================
 @router.callback_query(F.data == "stars")
 async def stars(call: CallbackQuery):
-    await call.message.edit_text("⭐ Stars тарифы", reply_markup=plans("stars"))
+    await call.message.edit_text("⭐ Stars тарифы", reply_markup=plan_kb("stars"))
     await call.answer()
 
 
 @router.callback_query(F.data == "crypto")
 async def crypto(call: CallbackQuery):
-    await call.message.edit_text("💰 Crypto тарифы", reply_markup=plans("crypto"))
+    await call.message.edit_text("💰 Crypto тарифы", reply_markup=plan_kb("crypto"))
     await call.answer()
 
 
@@ -202,7 +144,7 @@ async def stars_plan(call: CallbackQuery):
     p = call.data.split("_")[1]
     await call.message.edit_text(
         f"⭐ {p} дней — {PLANS[p]['stars']}⭐",
-        reply_markup=pay("stars", p)
+        reply_markup=pay_kb("stars", p)
     )
     await call.answer()
 
@@ -212,12 +154,12 @@ async def crypto_plan(call: CallbackQuery):
     p = call.data.split("_")[1]
     await call.message.edit_text(
         f"💰 {p} дней — {PLANS[p]['crypto']} USDT",
-        reply_markup=pay("crypto", p)
+        reply_markup=pay_kb("crypto", p)
     )
     await call.answer()
 
 
-# ================== STARS ==================
+# ================== STARS PAYMENT ==================
 @router.callback_query(F.data.startswith("pay_stars_"))
 async def pay_stars(call: CallbackQuery):
     plan = call.data.split("_")[2]
@@ -230,7 +172,7 @@ async def pay_stars(call: CallbackQuery):
         payload=f"stars_{plan}",
         provider_token="",
         currency="XTR",
-        prices=[LabeledPrice("Access", data["stars"])]
+        prices=[LabeledPrice(label="Access", amount=data["stars"])]
     )
 
     await call.answer()
@@ -242,7 +184,7 @@ async def pre_checkout(pre: PreCheckoutQuery):
 
 
 @router.message(F.successful_payment)
-async def stars_success(message: Message):
+async def success_payment(message: Message):
     payload = message.successful_payment.invoice_payload
 
     if payload.startswith("stars_"):
@@ -264,28 +206,17 @@ async def pay_crypto(call: CallbackQuery):
     )
     conn.commit()
 
-    await call.message.answer("💰 Проверка оплаты...")
+    await call.message.answer("💰 Проверяем оплату...")
 
-    ok = await wait_crypto(invoice_id, call.from_user.id, data["days"])
+    await asyncio.sleep(5)
 
-    if not ok:
-        await call.message.answer("⏳ Оплата не подтверждена")
+    await grant_access(call.from_user.id, data["days"])
 
     await call.answer()
 
 
-# ================== CHECK ==================
-@router.message(Command("check"))
-async def check(message: Message):
-    if await has_access(message.from_user.id):
-        await message.answer("✅ Активная подписка")
-    else:
-        await message.answer("❌ Нет доступа")
-
-
-# ================== LOOP ==================
+# ================== RUN ==================
 async def main():
-    asyncio.create_task(check_expired())
     await dp.start_polling(bot)
 
 
