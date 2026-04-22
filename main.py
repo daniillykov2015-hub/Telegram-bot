@@ -14,7 +14,6 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
     LabeledPrice,
-    PreCheckoutQuery,
 )
 
 # ================== CONFIG ==================
@@ -62,10 +61,13 @@ PLANS = {
 
 # ================== SAFE UI ==================
 async def safe_update(call: CallbackQuery, text: str | None = None, markup=None):
-    if text:
-        await call.message.edit_text(text, reply_markup=markup)
-    else:
-        await call.message.edit_reply_markup(reply_markup=markup)
+    try:
+        if text:
+            await call.message.edit_text(text, reply_markup=markup)
+        else:
+            await call.message.edit_reply_markup(reply_markup=markup)
+    except:
+        pass
     await call.answer()
 
 # ================== KEYBOARDS ==================
@@ -93,7 +95,7 @@ def pay(prefix, plan):
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
 
-# ================== START TEXT ==================
+# ================== START ==================
 @router.message(CommandStart())
 async def start(message: Message):
     text = (
@@ -152,18 +154,19 @@ async def pay_stars(call: CallbackQuery):
         prices=[LabeledPrice(label="Access", amount=data["stars"])]
     )
 
-# ================== CRYPTO PAYMENT (FIXED + AUTO VERIFY) ==================
+# ================== CRYPTO PAYMENT ==================
 @router.callback_query(F.data.startswith("pay:crypto:"))
 async def pay_crypto(call: CallbackQuery):
     await call.answer()
 
+    user_id = call.from_user.id
     plan = call.data.split(":")[2]
 
-    if call.from_user.id in active_invoices:
-        await call.answer("⏳ Уже есть счёт", show_alert=True)
+    if user_id in active_invoices:
+        await call.answer("⏳ Уже есть активный счёт", show_alert=True)
         return
 
-    active_invoices[call.from_user.id] = plan
+    active_invoices[user_id] = plan
     data = PLANS[plan]
 
     r = requests.post(
@@ -177,19 +180,17 @@ async def pay_crypto(call: CallbackQuery):
 
     cursor.execute(
         "INSERT INTO payments VALUES (?, ?, ?, ?)",
-        (invoice_id, call.from_user.id, data["days"], "pending")
+        (invoice_id, user_id, data["days"], "pending")
     )
     conn.commit()
 
     await call.message.answer(f"💰 Оплата:\n{invoice['pay_url']}")
 
-    # 🔥 запускаем авто-проверку оплаты
-    asyncio.create_task(check_payment(invoice_id, call.from_user.id, data["days"]))
-
+    asyncio.create_task(check_payment(invoice_id, user_id, data["days"]))
 
 # ================== AUTO CHECK PAYMENT ==================
 async def check_payment(invoice_id: str, user_id: int, days: int):
-    for _ in range(30):  # ~5 минут проверок
+    for _ in range(30):
         try:
             r = requests.get(
                 "https://pay.crypt.bot/api/getInvoices",
@@ -200,10 +201,21 @@ async def check_payment(invoice_id: str, user_id: int, days: int):
                 if inv["invoice_id"] == invoice_id and inv["status"] == "paid":
 
                     cursor.execute(
+                        "SELECT status FROM payments WHERE invoice_id=?",
+                        (invoice_id,)
+                    )
+                    row = cursor.fetchone()
+
+                    if row and row[0] == "paid":
+                        return
+
+                    cursor.execute(
                         "UPDATE payments SET status=? WHERE invoice_id=?",
                         ("paid", invoice_id)
                     )
                     conn.commit()
+
+                    active_invoices.pop(user_id, None)
 
                     await grant_access(user_id, days)
                     return
@@ -236,8 +248,6 @@ async def grant_access(user_id: int, days: int):
         user_id,
         f"✅ Доступ активирован до:\n{new_expire.strftime('%Y-%m-%d %H:%M')}"
     )
-
-    active_invoices.pop(user_id, None)
 
 # ================== RUN ==================
 async def main():
