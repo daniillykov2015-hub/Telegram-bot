@@ -21,7 +21,7 @@ CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# ================= ЦЕНЫ =================
+# ================= PRICES =================
 
 STARS = {
     "1": 550,
@@ -45,8 +45,7 @@ def main_kb():
         ]
     ])
 
-
-# ================= STARS MENU =================
+# ================= STARS =================
 
 def stars_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -56,8 +55,7 @@ def stars_menu_kb():
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back_main")]
     ])
 
-
-# ================= CRYPTO MENU =================
+# ================= CRYPTO =================
 
 def crypto_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -67,49 +65,38 @@ def crypto_menu_kb():
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back_main")]
     ])
 
-
 # ================= START =================
 
 @dp.message(F.text == "/start")
 async def start(message: Message):
-    await message.answer(
-        "🔒 Главное меню",
-        reply_markup=main_kb()
-    )
-
+    await message.answer("🔒 Главное меню", reply_markup=main_kb())
 
 # ================= BACK =================
 
 @dp.callback_query(F.data == "back_main")
-async def back_main(call: CallbackQuery):
-    await call.message.edit_text(
-        "🔒 Главное меню",
-        reply_markup=main_kb()
-    )
+async def back(call: CallbackQuery):
+    await call.message.edit_text("🔒 Главное меню", reply_markup=main_kb())
     await call.answer()
-
 
 # ================= STARS MENU =================
 
 @dp.callback_query(F.data == "stars")
-async def stars(call: CallbackQuery):
+async def stars_menu(call: CallbackQuery):
     await call.message.edit_text(
-        "⭐ Оплата Stars\n\nВыбери тариф:",
+        "⭐ Stars оплата\n\nВыбери тариф:",
         reply_markup=stars_menu_kb()
     )
     await call.answer()
 
-
 # ================= CRYPTO MENU =================
 
 @dp.callback_query(F.data == "crypto")
-async def crypto(call: CallbackQuery):
+async def crypto_menu(call: CallbackQuery):
     await call.message.edit_text(
         "💰 Crypto оплата\n\nВыбери тариф:",
         reply_markup=crypto_menu_kb()
     )
     await call.answer()
-
 
 # ================= STARS PLAN =================
 
@@ -119,28 +106,27 @@ async def stars_plan(call: CallbackQuery):
     price = STARS[plan]
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Оплатить", callback_data=f"pay_s_{plan}")],
+        [InlineKeyboardButton(text="💳 Перейти к оплате", callback_data=f"confirm_s_{plan}")],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
     ])
 
     await call.message.edit_text(
-        f"⭐ Тариф: {plan} дней\nЦена: {price}⭐",
+        f"⭐ Тариф: {plan} дней\nЦена: {price}⭐\n\nПодтверждение оплаты:",
         reply_markup=kb
     )
     await call.answer()
 
+# ================= STARS CONFIRM =================
 
-# ================= STARS PAYMENT =================
-
-@dp.callback_query(F.data.startswith("pay_s_"))
-async def pay_stars(call: CallbackQuery):
+@dp.callback_query(F.data.startswith("confirm_s_"))
+async def stars_confirm(call: CallbackQuery):
     plan = call.data.split("_")[2]
     price = STARS[plan]
 
     await bot.send_invoice(
         chat_id=call.message.chat.id,
         title=f"{plan} дней доступа",
-        description="Stars оплата",
+        description="Оплата Stars",
         payload=f"stars_{plan}",
         provider_token="",
         currency="XTR",
@@ -148,7 +134,6 @@ async def pay_stars(call: CallbackQuery):
     )
 
     await call.answer()
-
 
 # ================= CRYPTO PLAN =================
 
@@ -158,18 +143,17 @@ async def crypto_plan(call: CallbackQuery):
     price = CRYPTO[plan]
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Создать инвойс", callback_data=f"pay_c_{plan}")],
+        [InlineKeyboardButton(text="💳 Создать инвойс", callback_data=f"confirm_c_{plan}")],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="crypto")]
     ])
 
     await call.message.edit_text(
-        f"💰 Тариф: {plan} дней\nЦена: {price} USDT",
+        f"💰 Тариф: {plan} дней\nЦена: {price} USDT\n\nПодтверждение:",
         reply_markup=kb
     )
     await call.answer()
 
-
-# ================= CRYPTO API =================
+# ================= CRYPTO CREATE INVOICE =================
 
 def create_invoice(amount, label):
     url = "https://pay.crypt.bot/api/createInvoice"
@@ -183,20 +167,10 @@ def create_invoice(amount, label):
     r = requests.post(url, headers=headers, json=data)
     return r.json()["result"]
 
+# ================= CRYPTO CONFIRM =================
 
-def check_invoice(invoice_id):
-    url = "https://pay.crypt.bot/api/getInvoices"
-    headers = {"Crypto-Pay-API-Token": CRYPTO_TOKEN}
-    params = {"invoice_ids": invoice_id}
-
-    r = requests.get(url, headers=headers, params=params)
-    return r.json()["result"]["items"][0]["status"]
-
-
-# ================= CRYPTO PAY =================
-
-@dp.callback_query(F.data.startswith("pay_c_"))
-async def pay_crypto(call: CallbackQuery):
+@dp.callback_query(F.data.startswith("confirm_c_"))
+async def crypto_confirm(call: CallbackQuery):
     plan = call.data.split("_")[2]
     amount = CRYPTO[plan]
 
@@ -208,17 +182,24 @@ async def pay_crypto(call: CallbackQuery):
     ])
 
     await call.message.answer(
-        f"💰 Оплати:\n{invoice['pay_url']}",
+        f"💰 Оплата:\n{invoice['pay_url']}",
         reply_markup=kb
     )
 
     await call.answer()
 
-
 # ================= CHECK PAYMENT =================
 
+def check_invoice(invoice_id):
+    url = "https://pay.crypt.bot/api/getInvoices"
+    headers = {"Crypto-Pay-API-Token": CRYPTO_TOKEN}
+    params = {"invoice_ids": invoice_id}
+
+    r = requests.get(url, headers=headers, params=params)
+    return r.json()["result"]["items"][0]["status"]
+
 @dp.callback_query(F.data.startswith("check_"))
-async def check_pay(call: CallbackQuery):
+async def check_payment(call: CallbackQuery):
     invoice_id = call.data.split("_")[1]
 
     status = check_invoice(invoice_id)
@@ -227,22 +208,19 @@ async def check_pay(call: CallbackQuery):
         await call.answer("Не оплачено ❌", show_alert=True)
         return
 
-    await call.message.answer("✅ Оплата подтверждена!")
+    await call.message.answer("✅ Оплата подтверждена")
     await call.answer()
-
 
 # ================= STARS SUCCESS =================
 
 @dp.message(F.content_type == ContentType.SUCCESSFUL_PAYMENT)
-async def success(message: Message):
+async def stars_success(message: Message):
     await message.answer("⭐ Stars оплата прошла!")
-
 
 # ================= RUN =================
 
 async def main():
     await dp.start_polling(bot)
-
 
 if __name__ == "__main__":
     asyncio.run(main())
