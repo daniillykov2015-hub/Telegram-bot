@@ -92,47 +92,42 @@ def pay_kb(prefix, plan):
 async def start(message: Message):
     await message.answer(MAIN_TEXT, reply_markup=menu())
 
-# ================== SAFE NAV (НЕ ЛОМАЕТ ТЕКСТ) ==================
-async def swap_keyboard(call: CallbackQuery, markup):
-    await call.message.edit_reply_markup(reply_markup=markup)
+# ================== SAFE NAV (без смены текста) ==================
+async def swap(call: CallbackQuery, markup):
+    try:
+        await call.message.edit_reply_markup(reply_markup=markup)
+    except:
+        pass
     await call.answer()
 
 # ================== BACK ==================
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
-    await swap_keyboard(call, menu())
+    await swap(call, menu())
 
 # ================== MENU ==================
 @router.callback_query(F.data == "stars")
 async def stars(call: CallbackQuery):
-    await swap_keyboard(call, plans("stars"))
+    await swap(call, plans("stars"))
 
 
 @router.callback_query(F.data == "crypto")
 async def crypto(call: CallbackQuery):
-    await swap_keyboard(call, plans("crypto"))
+    await swap(call, plans("crypto"))
 
 # ================== PLANS ==================
 @router.callback_query(F.data.startswith("stars:"))
 async def stars_plan(call: CallbackQuery):
     plan = call.data.split(":")[1]
-
-    await call.message.edit_reply_markup(
-        reply_markup=pay_kb("stars", plan)
-    )
-    await call.answer()
+    await swap(call, pay_kb("stars", plan))
 
 
 @router.callback_query(F.data.startswith("crypto:"))
 async def crypto_plan(call: CallbackQuery):
     plan = call.data.split(":")[1]
+    await swap(call, pay_kb("crypto", plan))
 
-    await call.message.edit_reply_markup(
-        reply_markup=pay_kb("crypto", plan)
-    )
-    await call.answer()
-
-# ================== REF SYSTEM ==================
+# ================== REF SYSTEM (ФИКС) ==================
 @router.callback_query(F.data == "ref")
 async def ref(call: CallbackQuery):
     user_id = call.from_user.id
@@ -152,12 +147,15 @@ async def ref(call: CallbackQuery):
         "2️⃣ Пригласи друга по ссылке\n"
         "3️⃣ Он оформляет доступ\n"
         "4️⃣ Ты получаешь +7 дней\n\n"
-        f"🔗 Ссылка:\n{link}\n\n"
+        f"🔗 Твоя ссылка:\n{link}\n\n"
         f"👤 Приглашено: {count}"
     )
 
-    await call.message.edit_text(text, reply_markup=back_kb())
-    await call.answer()
+    # ❗ ВАЖНО: теперь НЕ edit_text
+    await swap(call, back_kb())
+
+    # отправляем инфо отдельным сообщением (UI не ломается)
+    await call.message.answer(text)
 
 # ================== REF LOGIC ==================
 @router.message(CommandStart(deep_link=True))
@@ -203,7 +201,7 @@ async def referral_start(message: Message):
         conn.commit()
 
         try:
-            await bot.send_message(ref_id, "🎉 +7 дней за нового друга!")
+            await bot.send_message(ref_id, "🎉 +7 дней за друга начислено!")
         except:
             pass
 
