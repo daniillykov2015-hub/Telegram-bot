@@ -34,7 +34,7 @@ def main_menu():
     ])
 
 
-def back_button():
+def back_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
@@ -65,7 +65,7 @@ async def start(message: Message):
     )
 
 
-# ---------------- MAIN MENU ---------------- #
+# ---------------- BACK ---------------- #
 
 @dp.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
@@ -76,33 +76,39 @@ async def back(call: CallbackQuery):
     await call.answer()
 
 
+# ---------------- STARS MENU ---------------- #
+
 @dp.callback_query(F.data == "stars")
 async def stars_menu(call: CallbackQuery):
     await call.message.edit_text(
         "⭐ Stars оплата\nВыбери тариф:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton("1 день — 550⭐", callback_data="s_1")],
-            [InlineKeyboardButton("7 дней — 770⭐", callback_data="s_7")],
-            [InlineKeyboardButton("30 дней — 1100⭐", callback_data="s_30")],
-            [InlineKeyboardButton("⬅ Назад", callback_data="back")]
+            [InlineKeyboardButton(text="1 день — 550⭐", callback_data="s_1")],
+            [InlineKeyboardButton(text="7 дней — 770⭐", callback_data="s_7")],
+            [InlineKeyboardButton(text="30 дней — 1100⭐", callback_data="s_30")],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
         ])
     )
     await call.answer()
 
+
+# ---------------- CRYPTO MENU ---------------- #
 
 @dp.callback_query(F.data == "crypto")
 async def crypto_menu(call: CallbackQuery):
     await call.message.edit_text(
         "💰 Crypto оплата\nВыбери тариф:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton("1 день — 5 USDT", callback_data="c_1")],
-            [InlineKeyboardButton("7 дней — 7 USDT", callback_data="c_7")],
-            [InlineKeyboardButton("30 дней — 10 USDT", callback_data="c_30")],
-            [InlineKeyboardButton("⬅ Назад", callback_data="back")]
+            [InlineKeyboardButton(text="1 день — 5 USDT", callback_data="c_1")],
+            [InlineKeyboardButton(text="7 дней — 7 USDT", callback_data="c_7")],
+            [InlineKeyboardButton(text="30 дней — 10 USDT", callback_data="c_30")],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
         ])
     )
     await call.answer()
 
+
+# ---------------- INFO ---------------- #
 
 @dp.callback_query(F.data == "info")
 async def info(call: CallbackQuery):
@@ -113,7 +119,7 @@ async def info(call: CallbackQuery):
         "1 день — 550⭐ / 5 USDT\n"
         "7 дней — 770⭐ / 7 USDT\n"
         "30 дней — 1100⭐ / 10 USDT",
-        reply_markup=back_button()
+        reply_markup=back_kb()
     )
     await call.answer()
 
