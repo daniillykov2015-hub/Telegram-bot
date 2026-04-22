@@ -47,6 +47,14 @@ CREATE TABLE IF NOT EXISTS payments (
 )
 """)
 
+# 🆕 рефералы
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS referrals (
+    user_id INTEGER,
+    referred_id INTEGER UNIQUE
+)
+""")
+
 conn.commit()
 
 # ================== CACHE ==================
@@ -76,6 +84,9 @@ def menu():
         [
             InlineKeyboardButton(text="⭐ Stars", callback_data="stars"),
             InlineKeyboardButton(text="💰 Crypto", callback_data="crypto"),
+        ],
+        [
+            InlineKeyboardButton(text="👥 Реф система", callback_data="ref")
         ]
     ])
 
@@ -109,6 +120,80 @@ async def start(message: Message):
 
     await message.answer(text, reply_markup=menu())
 
+# ================== REF SYSTEM ==================
+@router.callback_query(F.data == "ref")
+async def ref(call: CallbackQuery):
+    user_id = call.from_user.id
+
+    link = f"https://t.me/{(await bot.get_me()).username}?start={user_id}"
+
+    cursor.execute(
+        "SELECT COUNT(*) FROM referrals WHERE user_id=?",
+        (user_id,)
+    )
+    count = cursor.fetchone()[0]
+
+    await safe_update(
+        call,
+        f"👥 Реферальная система\n\n"
+        f"Твоя ссылка:\n{link}\n\n"
+        f"Приведено друзей: {count}\n"
+        f"Бонус: +7 дней за каждого друга"
+    )
+
+# ================== REF LOGIC ==================
+@router.message(CommandStart(deep_link=True))
+async def referral_start(message: Message):
+    args = message.text.split()
+
+    if len(args) > 1:
+        ref_id = int(args[1])
+        user_id = message.from_user.id
+
+        if ref_id != user_id:
+            cursor.execute(
+                "SELECT 1 FROM referrals WHERE referred_id=?",
+                (user_id,)
+            )
+            already = cursor.fetchone()
+
+            if not already:
+                cursor.execute(
+                    "INSERT INTO referrals VALUES (?, ?)",
+                    (ref_id, user_id)
+                )
+                conn.commit()
+
+                # +7 дней рефереру
+                cursor.execute(
+                    "SELECT expire_date FROM users WHERE user_id=?",
+                    (ref_id,)
+                )
+                row = cursor.fetchone()
+
+                now = datetime.utcnow()
+                bonus = timedelta(days=7)
+
+                if row and row[0]:
+                    exp = datetime.fromisoformat(row[0])
+                    new_exp = exp + bonus if exp > now else now + bonus
+                else:
+                    new_exp = now + bonus
+
+                cursor.execute(
+                    "INSERT OR REPLACE INTO users VALUES (?, ?)",
+                    (ref_id, new_exp.isoformat())
+                )
+                conn.commit()
+
+                try:
+                    await bot.send_message(
+                        ref_id,
+                        "🎉 У тебя новый друг!\n+7 дней к подписке начислено"
+                    )
+                except:
+                    pass
+
 # ================== NAV ==================
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
@@ -136,123 +221,9 @@ async def crypto_plan(call: CallbackQuery):
     plan = call.data.split(":")[1]
     await safe_update(call, f"{plan} дней — {PLANS[plan]['crypto']} USDT", pay("crypto", plan))
 
-# ================== STARS PAYMENT ==================
-@router.callback_query(F.data.startswith("pay:stars:"))
-async def pay_stars(call: CallbackQuery):
-    await call.answer()
-
-    plan = call.data.split(":")[2]
-    data = PLANS[plan]
-
-    await bot.send_invoice(
-        chat_id=call.message.chat.id,
-        title="Access",
-        description="Stars payment",
-        payload=f"stars_{plan}",
-        provider_token="",
-        currency="XTR",
-        prices=[LabeledPrice(label="Access", amount=data["stars"])]
-    )
-
-# ================== CRYPTO PAYMENT ==================
-@router.callback_query(F.data.startswith("pay:crypto:"))
-async def pay_crypto(call: CallbackQuery):
-    await call.answer()
-
-    user_id = call.from_user.id
-    plan = call.data.split(":")[2]
-
-    if user_id in active_invoices:
-        await call.answer("⏳ Уже есть активный счёт", show_alert=True)
-        return
-
-    active_invoices[user_id] = plan
-    data = PLANS[plan]
-
-    r = requests.post(
-        "https://pay.crypt.bot/api/createInvoice",
-        headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
-        json={"asset": "USDT", "amount": data["crypto"]}
-    ).json()
-
-    invoice = r["result"]
-    invoice_id = invoice["invoice_id"]
-
-    cursor.execute(
-        "INSERT INTO payments VALUES (?, ?, ?, ?)",
-        (invoice_id, user_id, data["days"], "pending")
-    )
-    conn.commit()
-
-    await call.message.answer(f"💰 Оплата:\n{invoice['pay_url']}")
-
-    asyncio.create_task(check_payment(invoice_id, user_id, data["days"]))
-
-# ================== AUTO CHECK PAYMENT ==================
-async def check_payment(invoice_id: str, user_id: int, days: int):
-    for _ in range(30):
-        try:
-            r = requests.get(
-                "https://pay.crypt.bot/api/getInvoices",
-                headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN}
-            ).json()
-
-            for inv in r["result"]["items"]:
-                if inv["invoice_id"] == invoice_id and inv["status"] == "paid":
-
-                    cursor.execute(
-                        "SELECT status FROM payments WHERE invoice_id=?",
-                        (invoice_id,)
-                    )
-                    row = cursor.fetchone()
-
-                    if row and row[0] == "paid":
-                        return
-
-                    cursor.execute(
-                        "UPDATE payments SET status=? WHERE invoice_id=?",
-                        ("paid", invoice_id)
-                    )
-                    conn.commit()
-
-                    active_invoices.pop(user_id, None)
-
-                    await grant_access(user_id, days)
-                    return
-
-        except Exception as e:
-            logging.error(f"check_payment error: {e}")
-
-        await asyncio.sleep(10)
-
-# ================== ACCESS ==================
-async def grant_access(user_id: int, days: int):
-    now = datetime.utcnow()
-
-    cursor.execute("SELECT expire_date FROM users WHERE user_id=?", (user_id,))
-    row = cursor.fetchone()
-
-    if row and row[0]:
-        current = datetime.fromisoformat(row[0])
-        new_expire = current + timedelta(days=days) if current > now else now + timedelta(days=days)
-    else:
-        new_expire = now + timedelta(days=days)
-
-    cursor.execute(
-        "INSERT OR REPLACE INTO users VALUES (?, ?)",
-        (user_id, new_expire.isoformat())
-    )
-    conn.commit()
-
-    await bot.send_message(
-        user_id,
-        f"✅ Доступ активирован до:\n{new_expire.strftime('%Y-%m-%d %H:%M')}"
-    )
-
 # ================== RUN ==================
 async def main():
     await dp.start_polling(bot)
-
 
 if __name__ == "__main__":
     asyncio.run(main())
