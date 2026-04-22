@@ -4,11 +4,7 @@ import os
 import requests
 import sqlite3
 from datetime import datetime, timedelta
-
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import ContentType, InlineKeyboardButton, InlineKeyboardMarkup
-from 
-
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1568,13 +1564,13 @@ async def debug(message: types.Message):
 
 
 
-    import asyncio
-
-async def start_bot():
+    async def start_bot():
     try:
-        await dp.start_polling()
+        # bot — это имя переменной вашего бота из начала файла
+        await dp.start_polling(bot)
     finally:
         await bot.session.close()
 
 if __name__ == '__main__':
+    import asyncio
     asyncio.run(start_bot())
