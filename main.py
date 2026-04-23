@@ -16,6 +16,7 @@ from aiogram.types import (
     LabeledPrice,
     ChatJoinRequest,
     PreCheckoutQuery,
+    SuccessfulPayment,
 )
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
@@ -43,7 +44,7 @@ dp.include_router(router)
 
 DB_NAME = "users.db"
 
-http_session = None  # FIX: общий session (был утечка)
+http_session = None
 
 # ================== DB ==================
 async def init_db():
@@ -79,7 +80,6 @@ async def extend_user(user_id, days):
         ) as cur:
             row = await cur.fetchone()
 
-        # FIX: row[0] вместо row[1] (у тебя был критический баг)
         if row and row[0]:
             current = datetime.fromisoformat(row[0])
             base = max(datetime.now(timezone.utc), current)
@@ -224,6 +224,18 @@ async def stars_pay(call: CallbackQuery):
         ])
     )
 
+@router.pre_checkout_query()
+async def pre_checkout(query: PreCheckoutQuery):
+    await query.answer(ok=True)
+
+@router.message(F.successful_payment)
+async def success_stars_payment(message: Message):
+    payload = message.successful_payment.invoice_payload
+    if payload.startswith("stars_"):
+        plan_id = payload.split("_")[1]
+        await extend_user(message.from_user.id, PLANS[plan_id]["days"])
+        await message.answer("✅ Оплата Stars принята! Подписка продлена.")
+
 # ================== CRYPTO ==================
 @router.callback_query(F.data == "crypto")
 async def crypto(call: CallbackQuery):
@@ -240,37 +252,41 @@ async def crypto_pay(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
     plan = PLANS[plan_id]
 
-    async with http_session.post(
-        "https://pay.crypt.bot/api/createInvoice",
-        headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
-        json={
-            "asset": "USDT",
-            "amount": str(plan["crypto"]),
-            "description": "Subscription"
-        }
-    ) as resp:
-        data = await resp.json()
+    try:
+        async with http_session.post(
+            "https://pay.crypt.bot/api/createInvoice",
+            headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
+            json={
+                "asset": "USDT",
+                "amount": str(plan["crypto"]),
+                "description": "Subscription"
+            }
+        ) as resp:
+            data = await resp.json()
 
-    if not data.get("ok"):
-        await call.answer("Ошибка оплаты")
-        return
+        if not data.get("ok"):
+            await call.answer("Ошибка оплаты")
+            return
 
-    inv = data["result"]
+        inv = data["result"]
 
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("""
-            INSERT OR IGNORE INTO crypto_invoices (invoice_id, user_id, plan_id)
-            VALUES (?, ?, ?)
-        """, (str(inv["invoice_id"]), call.from_user.id, plan_id))
-        await db.commit()
+        async with aiosqlite.connect(DB_NAME) as db:
+            await db.execute("""
+                INSERT OR IGNORE INTO crypto_invoices (invoice_id, user_id, plan_id)
+                VALUES (?, ?, ?)
+            """, (str(inv["invoice_id"]), call.from_user.id, plan_id))
+            await db.commit()
 
-    await call.message.edit_text(
-        f"💰 {plan['crypto']} $",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Оплатить", url=inv["pay_url"])],
-            [InlineKeyboardButton(text="⬅ Назад", callback_data="crypto")]
-        ])
-    )
+        await call.message.edit_text(
+            f"💰 {plan['crypto']} $",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Оплатить", url=inv["pay_url"])],
+                [InlineKeyboardButton(text="⬅ Назад", callback_data="crypto")]
+            ])
+        )
+    except Exception as e:
+        logging.error(f"Crypto pay error: {e}")
+        await call.answer("Сервис оплаты временно недоступен")
 
 # ================== JOIN ==================
 @router.chat_join_request()
@@ -287,63 +303,4 @@ async def join(req: ChatJoinRequest):
 # ================== CHECKERS ==================
 async def crypto_checker():
     while True:
-        await asyncio.sleep(25)
-
-        async with http_session.get(
-            "https://pay.crypt.bot/api/getInvoices",
-            headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN}
-        ) as resp:
-            data = await resp.json()
-
-        if not data.get("ok"):
-            continue
-
-        for inv in data["result"].get("items", []):
-
-            if inv["status"] != "paid":
-                continue
-
-            invoice_id = str(inv["invoice_id"])
-
-            async with aiosqlite.connect(DB_NAME) as db:
-                async with db.execute(
-                    "SELECT status FROM crypto_invoices WHERE invoice_id=?",
-                    (invoice_id,)
-                ) as cur:
-                    row = await cur.fetchone()
-
-                if row and row[0] == "paid":
-                    continue
-
-                await db.execute(
-                    "UPDATE crypto_invoices SET status='paid' WHERE invoice_id=?",
-                    (invoice_id,)
-                )
-
-                async with db.execute(
-                    "SELECT user_id, plan_id FROM crypto_invoices WHERE invoice_id=?",
-                    (invoice_id,)
-                ) as cur:
-                    data_row = await cur.fetchone()
-
-                if data_row:
-                    await extend_user(data_row[0], PLANS[data_row[1]]["days"])
-                    await bot.send_message(data_row[0], "✅ Оплата принята")
-
-                await db.commit()
-
-# ================== MAIN ==================
-async def main():
-    global http_session
-    http_session = aiohttp.ClientSession()
-
-    await init_db()
-
-    asyncio.create_task(crypto_checker())
-
-    await dp.start_polling(bot)
-
-    await http_session.close()
-
-if __name__ == "__main__":
-    asyncio.run(main())
+        await asyncio.sleep(
