@@ -7,7 +7,7 @@ import aiosqlite
 from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, Command
 from aiogram.types import (
     Message,
     CallbackQuery,
@@ -19,7 +19,7 @@ from aiogram.types import (
 )
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramForbidden
 
 # ================== CONFIG ==================
 logging.basicConfig(level=logging.INFO)
@@ -27,11 +27,13 @@ logging.basicConfig(level=logging.INFO)
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
 CHANNEL_ID = os.getenv("TELEGRAM_GROUP_ID")
+ADMIN_ID = os.getenv("ADMIN_ID") # Берется из Environment Variables
 
-if not BOT_TOKEN or not CRYPTO_TOKEN or not CHANNEL_ID:
-    raise ValueError("Missing environment variables!")
+if not BOT_TOKEN or not CRYPTO_TOKEN or not CHANNEL_ID or not ADMIN_ID:
+    raise ValueError("Missing environment variables (BOT_TOKEN, CRYPTO_TOKEN, TELEGRAM_GROUP_ID, or ADMIN_ID)!")
 
 CHANNEL_ID = int(CHANNEL_ID)
+ADMIN_ID = int(ADMIN_ID)
 DB_NAME = "users.db"
 
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
@@ -188,29 +190,19 @@ async def extend_user(user_id, days, is_bonus=False):
         ON CONFLICT(user_id) DO UPDATE SET expiry=excluded.expiry
         """, (user_id, new_expiry.isoformat()))
         
-        # Если это обычная покупка (не бонус) и у пользователя есть пригласитель
         if not is_bonus and row and row[1]:
             ref_id = row[1]
-            # Проверяем, есть ли у пригласителя активная подписка (условие начисления бонуса)
             async with db.execute("SELECT expiry FROM users WHERE user_id=?", (ref_id,)) as cur:
                 ref_row = await cur.fetchone()
                 if ref_row and ref_row[0]:
                     ref_expiry = datetime.fromisoformat(ref_row[0]).replace(tzinfo=timezone.utc)
                     if ref_expiry > datetime.now(timezone.utc):
-                        # Начисляем 7 дней пригласителю
-                        await db.execute("""
-                            UPDATE users 
-                            SET ref_count = ref_count + 1, 
-                                bonus_days = bonus_days + 7 
-                            WHERE user_id = ?
-                        """, (ref_id,))
+                        await db.execute("UPDATE users SET ref_count = ref_count + 1, bonus_days = bonus_days + 7 WHERE user_id = ?", (ref_id,))
                         await db.commit()
-                        # Продлеваем срок пригласителю
                         await extend_user(ref_id, 7, is_bonus=True)
                         try:
                             await bot.send_message(ref_id, "💎 <b>Бонус начислен!</b> Ваш друг оплатил подписку, вам добавлено <b>7 дней</b> доступа!")
-                        except:
-                            pass
+                        except: pass
         await db.commit()
 
 # ================== KEYBOARDS ==================
@@ -236,11 +228,54 @@ async def start(message: Message):
         await db.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
         if len(args) > 1 and args[1].isdigit():
             referrer = int(args[1])
-            # Нельзя пригласить самого себя
             if referrer != user_id:
                 await db.execute("UPDATE users SET referrer = ? WHERE user_id = ? AND referrer IS NULL", (referrer, user_id))
         await db.commit()
     await message.answer(MAIN_TEXT, reply_markup=main_menu_kb())
+
+# --- ADMIN PANEL ---
+@router.message(Command("admin"))
+async def admin_panel(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    async with aiosqlite.connect(DB_NAME) as db:
+        cur = await db.execute("SELECT COUNT(*) FROM users")
+        total_users = (await cur.fetchone())[0]
+        cur = await db.execute("SELECT COUNT(*) FROM users WHERE expiry IS NOT NULL")
+        active_subs = (await cur.fetchone())[0]
+    
+    text = (
+        "<b>🛠 Админ-панель</b>\n\n"
+        f"👥 Всего пользователей: {total_users}\n"
+        f"💎 Активных подписок: {active_subs}\n\n"
+        "<b>Команды:</b>\n"
+        "<code>/broadcast текст</code> — Рассылка всем пользователям"
+    )
+    await message.answer(text, parse_mode="HTML")
+
+@router.message(Command("broadcast"))
+async def broadcast(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    broadcast_text = message.text.replace("/broadcast", "").strip()
+    if not broadcast_text:
+        await message.answer("❌ Введи текст после команды")
+        return
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("SELECT user_id FROM users") as cur:
+            users = await cur.fetchall()
+    
+    count = 0
+    for (u_id,) in users:
+        try:
+            await bot.send_message(u_id, broadcast_text)
+            count += 1
+            await asyncio.sleep(0.05)
+        except (TelegramForbidden, TelegramBadRequest):
+            pass
+    
+    await message.answer(f"✅ Рассылка завершена. Отправлено: {count} пользователям.")
 
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
@@ -385,10 +420,12 @@ async def pre_checkout(pre: PreCheckoutQuery):
 @router.message(F.successful_payment)
 async def success(message: Message):
     payload = message.successful_payment.invoice_payload
-    if payload.startswith("stars_"):
-        plan_id = payload.split("_")[1]
-        await extend_user(message.from_user.id, PLANS[plan_id]["days"])
-        await message.answer("✅ Оплата прошла! Доступ активирован.")
+    plan_id = payload.split("_")[1]
+    await extend_user(message.from_user.id, PLANS[plan_id]["days"])
+    await message.answer("✅ Оплата прошла! Доступ активирован.")
+    try:
+        await bot.send_message(ADMIN_ID, f"💰 <b>Новая оплата Stars!</b>\nЮзер: {message.from_user.id}\nТариф: {PLANS[plan_id]['name']}")
+    except: pass
 
 @router.chat_join_request()
 async def join(req: ChatJoinRequest):
@@ -402,4 +439,58 @@ async def join(req: ChatJoinRequest):
 # --- BACKGROUND TASKS ---
 async def crypto_checker():
     while True:
-        try
+        try:
+            async with aiosqlite.connect(DB_NAME) as db:
+                async with db.execute("SELECT invoice_id, user_id, plan_id FROM crypto_invoices WHERE status='pending'") as cur:
+                    invoices = await cur.fetchall()
+            
+            for inv_id, u_id, p_id in invoices:
+                async with http_session.get(f"https://pay.crypt.bot/api/getInvoices?invoice_ids={inv_id}",
+                    headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN}) as resp:
+                    data = await resp.json()
+                
+                if data.get("ok") and data["result"]["items"][0]["status"] == "paid":
+                    await extend_user(u_id, PLANS[p_id]["days"])
+                    async with aiosqlite.connect(DB_NAME) as db:
+                        await db.execute("UPDATE crypto_invoices SET status='paid' WHERE invoice_id=?", (inv_id,))
+                        await db.commit()
+                    try:
+                        await bot.send_message(u_id, "✅ Ваша оплата через Crypto принята! Доступ активирован.")
+                        await bot.send_message(ADMIN_ID, f"💰 <b>Новая оплата Crypto!</b>\nЮзер: {u_id}\nТариф: {PLANS[p_id]['name']}")
+                    except: pass
+        except Exception as e:
+            logging.error(f"Crypto checker error: {e}")
+        await asyncio.sleep(20)
+
+async def check_subscriptions():
+    while True:
+        try:
+            async with aiosqlite.connect(DB_NAME) as db:
+                async with db.execute("SELECT user_id, expiry FROM users WHERE expiry IS NOT NULL") as cur:
+                    users = await cur.fetchall()
+
+            now = datetime.now(timezone.utc)
+            for user_id, expiry_str in users:
+                expiry_dt = datetime.fromisoformat(expiry_str).replace(tzinfo=timezone.utc)
+                if now > expiry_dt:
+                    try:
+                        await bot.ban_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
+                        await bot.unban_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
+                        async with aiosqlite.connect(DB_NAME) as db:
+                            await db.execute("UPDATE users SET expiry = NULL WHERE user_id = ?", (user_id,))
+                            await db.commit()
+                        await bot.send_message(user_id, "❌ Срок вашей подписки истёк. Вы были удалены из канала.")
+                        await asyncio.sleep(0.05)
+                    except: pass
+        except Exception as e:
+            logging.error(f"Subscription checker error: {e}")
+        await asyncio.sleep(3600)
+
+async def main():
+    global http_session
+    http_session = aiohttp.ClientSession()
+    await init_db()
+    asyncio.create_task(crypto_checker())
+    asyncio.create_task(check_subscriptions())
+    await dp.start_polling(bot)
+    await http
