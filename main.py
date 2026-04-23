@@ -27,9 +27,9 @@ dp.include_router(router)
 
 # ================== PLANS ==================
 PLANS = {
-    "1": {"stars": 550, "crypto": 5},
-    "7": {"stars": 770, "crypto": 7},
-    "30": {"stars": 1100, "crypto": 10},
+    "1": {"stars": 550, "crypto": 5, "name": "1 день"},
+    "7": {"stars": 770, "crypto": 7, "name": "7 дней"},
+    "30": {"stars": 1100, "crypto": 10, "name": "30 дней"},
 }
 
 # ================== TEXTS ==================
@@ -130,7 +130,7 @@ Platega
 10.1. Поддержка через бота.
 Пользователь подтверждает согласие с условиями."""
 
-# ================== MENU ==================
+# ================== KEYBOARDS ==================
 def menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -152,37 +152,52 @@ async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=menu())
     await call.answer()
 
-# --- STARS LOGIC (ИСПРАВЛЕНО ДЛЯ МГНОВЕННОЙ ОПЛАТЫ) ---
+# --- STARS LOGIC (КАК НА СКРИНШОТАХ) ---
 
 @router.callback_query(F.data == "stars")
 async def stars_menu(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="1 день — 550 ⭐", callback_data="stars:1")],
-        [InlineKeyboardButton(text="7 дней — 770 ⭐", callback_data="stars:7")],
-        [InlineKeyboardButton(text="30 дней — 1100 ⭐", callback_data="stars:30")],
+        [InlineKeyboardButton(text="1 день — 550 ⭐", callback_data="stars_confirm:1")],
+        [InlineKeyboardButton(text="7 дней — 770 ⭐", callback_data="stars_confirm:7")],
+        [InlineKeyboardButton(text="30 дней — 1100 ⭐", callback_data="stars_confirm:30")],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
     await call.message.edit_text("⭐ Выберите период подписки Stars:", reply_markup=kb)
     await call.answer()
 
-@router.callback_query(F.data.startswith("stars:"))
-async def stars_pay(call: CallbackQuery):
-    plan = call.data.split(":")[1]
-    price = PLANS[plan]["stars"]
+@router.callback_query(F.data.startswith("stars_confirm:"))
+async def stars_confirm(call: CallbackQuery):
+    plan_id = call.data.split(":")[1]
+    plan = PLANS[plan_id]
     
-    # Создаем прямую ссылку на инвойс
-    link = await bot.create_invoice_link(
+    # Генерируем прямую ссылку на оплату
+    invoice_link = await bot.create_invoice_link(
         title="Подписка",
-        description=f"Доступ на {plan} дн.",
-        payload=f"stars_{plan}",
-        provider_token="", # Для Stars пусто
+        description=f"Доступ в закрытый канал на {plan['name']}",
+        payload=f"stars_{plan_id}",
+        provider_token="", 
         currency="XTR",
-        prices=[LabeledPrice(label="Access", amount=price)]
+        prices=[LabeledPrice(label="Оплата Stars", amount=plan['stars'])]
     )
     
-    # Чтобы не было "пузыря", мы отправляем ссылку, которая открывает окно оплаты поверх интерфейса
-    # В Telegram при переходе по такой ссылке сразу открывается окно оплаты
-    await call.answer(url=link) 
+    # Формируем текст подтверждения (как на вашем фото 2)
+    text = (
+        "<b>Проверьте детали платежа:</b>\n\n"
+        f"📦 Тариф: {plan['name']}\n"
+        f"🗓 Срок: {plan['name']}\n"
+        "💳 Способ оплаты: ⭐ Telegram Stars\n"
+        f"💰 К оплате: {plan['stars']} ⭐\n\n"
+        "Нажмите 💸 Оплатить, чтобы перейти к оплате."
+    )
+    
+    # Кнопка Оплатить теперь содержит URL инвойса (как на вашем фото 2)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💸 Оплатить", url=invoice_link)],
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
+    ])
+    
+    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    await call.answer()
 
 # --- CRYPTO LOGIC ---
 
@@ -194,12 +209,12 @@ async def crypto_menu(call: CallbackQuery):
         [InlineKeyboardButton(text="30 дней — 10$", callback_data="crypto:30")],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
-    await call.message.edit_text("💰 Выберите период подписки Crypto (USDT):", reply_markup=kb)
+    await call.message.edit_text("💰 Выберите тариф Crypto (USDT):", reply_markup=kb)
     await call.answer()
 
 @router.callback_query(F.data.startswith("crypto:"))
 async def crypto_pay(call: CallbackQuery):
-    plan = call.data.split(":")[1]
+    plan_id = call.data.split(":")[1]
     
     async with aiohttp.ClientSession() as session:
         async with session.post(
@@ -207,27 +222,26 @@ async def crypto_pay(call: CallbackQuery):
             headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
             json={
                 "asset": "USDT",
-                "amount": str(PLANS[plan]["crypto"]),
-                "description": f"{plan} days access"
+                "amount": str(PLANS[plan_id]["crypto"]),
+                "description": f"{plan_id} days access"
             }
         ) as response:
             r = await response.json()
 
     if not r.get("ok"):
-        await call.message.answer("❌ Ошибка платежной системы CryptoPay")
+        await call.message.answer("❌ Ошибка CryptoPay")
         return
 
     url = r["result"]["pay_url"]
-    # Для CryptoBot мы вынуждены оставить кнопку, так как это внешний сервис
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Оплатить USDT", url=url)],
+        [InlineKeyboardButton(text="💰 Оплатить USDT", url=url)],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="crypto")]
     ])
 
-    await call.message.edit_text(f"💰 Оплата подписки на {plan} дн. через CryptoBot", reply_markup=kb)
+    await call.message.edit_text(f"💰 Оплата подписки на {PLANS[plan_id]['name']} через CryptoBot", reply_markup=kb)
     await call.answer()
 
-# --- CHECKOUT & SUCCESS ---
+# --- CHECKOUT ---
 
 @router.pre_checkout_query()
 async def pre_checkout(pre: PreCheckoutQuery):
@@ -235,22 +249,15 @@ async def pre_checkout(pre: PreCheckoutQuery):
 
 @router.message(F.successful_payment)
 async def success(message: Message):
-    await message.answer("✅ Оплата прошла! Ваш доступ активирован.")
+    await message.answer("✅ Оплата прошла! Доступ активирован.")
 
-# --- OTHER (ПОЛНЫЕ ТЕКСТЫ) ---
+# --- OTHER ---
 
 @router.callback_query(F.data == "ref")
 async def ref(call: CallbackQuery):
     text = (
         "👥 РЕФЕРАЛЬНАЯ СИСТЕМА\n\n"
         "Пригласи друга и получи +7 дней доступа\n\n"
-        "УСЛОВИЯ:\n"
-        "— у тебя должна быть активная подписка\n"
-        "— друг должен оплатить подписку\n\n"
-        "КАК ПОЛУЧИТЬ БОНУС:\n"
-        "1. Отправь свою ссылку другу\n"
-        "2. Он оплачивает доступ\n"
-        "3. Ты получаешь +7 дней автоматически\n\n"
         f"Твоя ссылка:\nhttps://t.me/your_bot?start={call.from_user.id}"
     )
     await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
