@@ -130,14 +130,17 @@ Platega
 10.1. Поддержка через бота.
 Пользователь подтверждает согласие с условиями."""
 
-# ================== MENU ==================
+# ================== MENU (С ПОДДЕРЖКОЙ) ==================
 def menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="⭐ Stars", callback_data="stars"),
             InlineKeyboardButton(text="💰 Crypto", callback_data="crypto"),
         ],
-        [InlineKeyboardButton(text="👥 Реферальная система", callback_data="ref")],
+        [
+            InlineKeyboardButton(text="👥 Реферальная система", callback_data="ref"),
+            InlineKeyboardButton(text="💬 Поддержка", url="https://t.me/mistybibi"),
+        ],
         [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
     ])
 
@@ -259,7 +262,7 @@ async def pre_checkout(pre: PreCheckoutQuery):
 async def success(message: Message):
     await message.answer("✅ Оплата прошла! Доступ активирован.")
 
-# --- OTHER ---
+# --- UPDATED REFERRAL SYSTEM ---
 
 @router.callback_query(F.data == "ref")
 async def ref(call: CallbackQuery):
@@ -280,12 +283,13 @@ async def ref(call: CallbackQuery):
     ]), parse_mode="HTML")
     await call.answer()
 
+# --- INFO ---
+
 @router.callback_query(F.data == "info")
 async def info(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📄 Политика конфиденциальности", callback_data="privacy")],
         [InlineKeyboardButton(text="📜 Пользовательское соглашение", callback_data="terms")],
-        [InlineKeyboardButton(text="💬 Поддержка", url="https://t.me/mistybibi")],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
     await call.message.edit_text("ℹ️ Информация", reply_markup=kb)
