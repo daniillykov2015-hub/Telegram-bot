@@ -32,7 +32,7 @@ PLANS = {
     "30": {"stars": 1100, "crypto": 10},
 }
 
-# ================== TEXTS ==================
+# ================== TEXT ==================
 MAIN_TEXT = (
     "👋 Привет, я Ева и это мой закрытый канал\n\n"
     "❓ Что внутри?\n\n"
@@ -45,7 +45,7 @@ MAIN_TEXT = (
 PRIVACY_TEXT = """Политика конфиденциальности
 Platega • 
 Данная Политика конфиденциальности регламентирует сбор идентификаторов аккаунта, технической информации и истории взаимодействий для обеспечения работы сервиса, связи с пользователем и аналитики. Передача данных третьим лицам допускается только по закону, для выполнения обязательств или с согласия пользователя.
-Администрация хранит информацию необходимый срок, применяет разумные меры защиты, но не гарантирует абсолютной безопасности. Пользователь самостоятельно риски передачи данных и принимает любые изменения в политике, продолжая использовать сервис.
+Администрация хранит информацию необходимый срок, применяет разумные меры защиты, но не гарантирует абсолютной безопасности. Пользователь самостоятельно несёт ответственность за риски, связанные с передачей данных и принимает любые изменения в политике, продолжая использовать сервис.
 
 1. Общие положения
  1.1. Настоящая Политика конфиденциальности (далее — «Политика») регулирует порядок обработки и защиты информации, которую Пользователь передаёт при использовании сервиса (далее — «Сервис»).
@@ -92,23 +92,26 @@ Platega
 
 2. Характер услуг и цифровых товаров
 2.1. Сервис предоставляет цифровые товары и услуги нематериального характера, включая информационные материалы, обучающие материалы, консультации, цифровые продукты и сервисные услуги.
-2.2. Материалы могут включать информацию из открытых источников, авторские материалы Администрации, аналитические обзоры.
+2.2. Материалы могут включать информацию из открытых источников, авторские материалы Администрации, аналитические обзоры, подборки и рекомендации.
 2.3. Пользователь понимает, что ценность Сервиса заключается в структуре, подаче и обработке информации, а не в уникальности отдельных данных.
+2.4. Сервис не гарантирует эксклюзивность или уникальность материалов вне платформы.
 
 3. Отказ от гарантий и ответственности
 3.1. Сервис предоставляется на условиях «AS IS» («как есть»).
-3.2. Администрация не гарантирует достижение результатов или бесперебойную работу.
-3.3. Администрация не несёт ответственности за любые убытки, потерю данных или действия третьих лиц.
+3.2. Администрация не гарантирует достижение результатов, соответствие ожиданиям или бесперебойную работу.
+3.3. Администрация не несёт ответственности за любые убытки, потерю данных, действия Пользователя, действия третьих лиц или технические сбои.
 
 4. Законность использования
 4.1. Пользователь обязуется не использовать Сервис в противоправных целях.
 4.2. Ответственность за использование Сервиса полностью лежит на Пользователе.
 
 5. Интеллектуальная собственность
-5.1. Все материалы защищены авторским правом. Запрещено копирование, распространение и перепродажа без разрешения.
+5.1. Все материалы защищены авторским правом.
+5.2. Запрещено копирование, распространение и перепродажа без разрешения.
 
 6. Ограничение доступа
 6.1. Администрация вправе ограничить или прекратить доступ к Сервису в любое время.
+6.2. Обязательства Пользователя при этом сохраняются.
 
 7. Платежи и возвраты
 7.1. Доступ предоставляется после оплаты.
@@ -116,68 +119,73 @@ Platega
 7.3. Запрещены chargeback без обращения в поддержку.
 
 8. Конфиденциальность
-8.1. Сервис собирает минимальную информацию. Полной безопасности в интернете не гарантируется.
+8.1. Сервис собирает минимальную информацию.
+8.2. Полной безопасности в интернете не гарантируется.
 
 9. Изменение условий
-9.1. Условия могут изменяться. Использование = согласие.
+9.1. Условия могут изменяться.
+9.2. Использование = согласие.
 
 10. Контакты
 10.1. Поддержка через бота.
 Пользователь подтверждает согласие с условиями."""
 
-# ================== KEYBOARDS ==================
+# ================== MENU ==================
 def menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="⭐ Stars", callback_data="stars"),
             InlineKeyboardButton(text="💰 Crypto", callback_data="crypto"),
         ],
-        [InlineKeyboardButton(text="👥 Реферальная система", callback_data="ref")],
-        [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
+        [
+            InlineKeyboardButton(text="👥 Реферальная система", callback_data="ref")
+        ],
+        [
+            InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")
+        ]
     ])
 
-# ================== HANDLERS ==================
-
+# ================== START ==================
 @router.message(CommandStart())
 async def start(message: Message):
     await message.answer(MAIN_TEXT, reply_markup=menu())
 
+# ================== BACK ==================
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=menu())
     await call.answer()
 
-# --- STARS LOGIC ---
-
+# ================== STARS MENU ==================
 @router.callback_query(F.data == "stars")
-async def stars_menu(call: CallbackQuery):
+async def stars(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="1 день — 550 ⭐", callback_data="stars:1")],
         [InlineKeyboardButton(text="7 дней — 770 ⭐", callback_data="stars:7")],
         [InlineKeyboardButton(text="30 дней — 1100 ⭐", callback_data="stars:30")],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
-    await call.message.edit_text("⭐ Выберите тариф Stars:", reply_markup=kb)
+    await call.message.edit_text("⭐ Выберите период подписки Stars:", reply_markup=kb)
     await call.answer()
 
+# ================== STARS DIRECT PAY ==================
 @router.callback_query(F.data.startswith("stars:"))
 async def stars_pay_directly(call: CallbackQuery):
     plan = call.data.split(":")[1]
     
-    # Сразу отправляем инвойс без промежуточного окна "Нажмите оплатить"
+    # Сразу отправляем инвойс, чтобы мгновенно открылось окно оплаты
     await bot.send_invoice(
         chat_id=call.message.chat.id,
         title="Подписка",
-        description=f"Доступ на {plan} дней",
+        description=f"Доступ в закрытый канал на {plan} дн.",
         payload=f"stars_{plan}",
         provider_token="",
         currency="XTR",
-        prices=[LabeledPrice(label="Access", amount=PLANS[plan]["stars"])]
+        prices=[LabeledPrice(label="Оплата Stars", amount=PLANS[plan]["stars"])]
     )
     await call.answer()
 
-# --- CRYPTO LOGIC ---
-
+# ================== CRYPTO LOGIC ==================
 @router.callback_query(F.data == "crypto")
 async def crypto_menu(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -186,7 +194,7 @@ async def crypto_menu(call: CallbackQuery):
         [InlineKeyboardButton(text="30 дней — 10$", callback_data="crypto:30")],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
-    await call.message.edit_text("💰 Выберите тариф Crypto (USDT):", reply_markup=kb)
+    await call.message.edit_text("💰 Выберите период подписки Crypto (USDT):", reply_markup=kb)
     await call.answer()
 
 @router.callback_query(F.data.startswith("crypto:"))
@@ -206,30 +214,31 @@ async def crypto_pay(call: CallbackQuery):
             r = await response.json()
 
     if not r.get("ok"):
-        await call.message.answer("❌ Ошибка создания счета в CryptoPay")
+        await call.message.answer("❌ Ошибка создания оплаты в CryptoBot")
         return
 
     url = r["result"]["pay_url"]
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💰 Оплатить USDT", url=url)],
+        [InlineKeyboardButton(text="💰 Оплатить через CryptoBot", url=url)],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="crypto")]
     ])
 
-    await call.message.edit_text(f"💰 Оплата {plan} дней подписки через CryptoBot", reply_markup=kb)
+    await call.message.edit_text(
+        f"💰 Оплата {plan} дней подписки через USDT\n\nНажмите кнопку ниже для перехода к оплате.",
+        reply_markup=kb
+    )
     await call.answer()
 
-# --- PAYMENT PROCESS ---
-
+# ================== PRECHECKOUT & SUCCESS ==================
 @router.pre_checkout_query()
 async def pre_checkout(pre: PreCheckoutQuery):
     await pre.answer(ok=True)
 
 @router.message(F.successful_payment)
 async def success(message: Message):
-    await message.answer("✅ Оплата прошла! Доступ активирован.")
+    await message.answer("✅ Оплата прошла успешно! Ваш доступ в закрытый канал активирован.")
 
-# --- INFO & OTHER ---
-
+# ================== REF ==================
 @router.callback_query(F.data == "ref")
 async def ref(call: CallbackQuery):
     text = (
@@ -244,11 +253,16 @@ async def ref(call: CallbackQuery):
         "3. Ты получаешь +7 дней автоматически\n\n"
         f"Твоя ссылка:\nhttps://t.me/your_bot?start={call.from_user.id}"
     )
-    await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
-    ]))
+
+    await call.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
+        ])
+    )
     await call.answer()
 
+# ================== INFO ==================
 @router.callback_query(F.data == "info")
 async def info(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -260,15 +274,21 @@ async def info(call: CallbackQuery):
     await call.message.edit_text("ℹ️ Информация", reply_markup=kb)
     await call.answer()
 
+# ================== PRIVACY ==================
 @router.callback_query(F.data == "privacy")
 async def privacy(call: CallbackQuery):
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅ Назад", callback_data="info")]])
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="info")]
+    ])
     await call.message.edit_text(PRIVACY_TEXT, reply_markup=kb)
     await call.answer()
 
+# ================== TERMS ==================
 @router.callback_query(F.data == "terms")
 async def terms(call: CallbackQuery):
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅ Назад", callback_data="info")]])
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="info")]
+    ])
     await call.message.edit_text(TERMS_TEXT, reply_markup=kb)
     await call.answer()
 
