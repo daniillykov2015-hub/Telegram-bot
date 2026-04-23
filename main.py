@@ -55,7 +55,7 @@ Platega •
  2.1. Сервис может собирать следующие типы данных:
  идентификаторы аккаунта (логин, ID, никнейм и т.п.);
  техническую информацию (IP-адрес, данные о браузере, устройстве и операционной системе);
- истории взаимодействий с Сервисом.
+ историю взаимодействий с Сервисом.
  2.2. Сервис не требует от Пользователя предоставления паспортных данных, документов, фотографий или другой личной информации, кроме минимально необходимой для работы.
 
 3. Использование информации
@@ -130,7 +130,7 @@ Platega
 10.1. Поддержка через бота.
 Пользователь подтверждает согласие с условиями."""
 
-# ================== MENU ==================
+# ================== KEYBOARDS ==================
 def menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -152,7 +152,7 @@ async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=menu())
     await call.answer()
 
-# --- STARS LOGIC ---
+# --- STARS LOGIC (КАК НА СКРИНШОТАХ) ---
 
 @router.callback_query(F.data == "stars")
 async def stars_menu(call: CallbackQuery):
@@ -170,6 +170,7 @@ async def stars_confirm(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
     plan = PLANS[plan_id]
     
+    # Генерируем прямую ссылку на оплату
     invoice_link = await bot.create_invoice_link(
         title="Подписка",
         description=f"Доступ в закрытый канал на {plan['name']}",
@@ -179,6 +180,7 @@ async def stars_confirm(call: CallbackQuery):
         prices=[LabeledPrice(label="Оплата Stars", amount=plan['stars'])]
     )
     
+    # Формируем текст подтверждения (как на вашем фото 2)
     text = (
         "<b>Проверьте детали платежа:</b>\n\n"
         f"📦 Тариф: {plan['name']}\n"
@@ -188,6 +190,7 @@ async def stars_confirm(call: CallbackQuery):
         "Нажмите 💸 Оплатить, чтобы перейти к оплате."
     )
     
+    # Кнопка Оплатить теперь содержит URL инвойса (как на вашем фото 2)
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💸 Оплатить", url=invoice_link)],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
@@ -196,23 +199,22 @@ async def stars_confirm(call: CallbackQuery):
     await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     await call.answer()
 
-# --- CRYPTO LOGIC (ТЕПЕРЬ С ТАКИМ ЖЕ ДИЗАЙНОМ) ---
+# --- CRYPTO LOGIC ---
 
 @router.callback_query(F.data == "crypto")
 async def crypto_menu(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="1 день — 5$", callback_data="crypto_confirm:1")],
-        [InlineKeyboardButton(text="7 дней — 7$", callback_data="crypto_confirm:7")],
-        [InlineKeyboardButton(text="30 дней — 10$", callback_data="crypto_confirm:30")],
+        [InlineKeyboardButton(text="1 день — 5$", callback_data="crypto:1")],
+        [InlineKeyboardButton(text="7 дней — 7$", callback_data="crypto:7")],
+        [InlineKeyboardButton(text="30 дней — 10$", callback_data="crypto:30")],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
     await call.message.edit_text("💰 Выберите тариф Crypto (USDT):", reply_markup=kb)
     await call.answer()
 
-@router.callback_query(F.data.startswith("crypto_confirm:"))
-async def crypto_confirm(call: CallbackQuery):
+@router.callback_query(F.data.startswith("crypto:"))
+async def crypto_pay(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
-    plan = PLANS[plan_id]
     
     async with aiohttp.ClientSession() as session:
         async with session.post(
@@ -220,8 +222,8 @@ async def crypto_confirm(call: CallbackQuery):
             headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
             json={
                 "asset": "USDT",
-                "amount": str(plan["crypto"]),
-                "description": f"Subscription {plan['name']}"
+                "amount": str(PLANS[plan_id]["crypto"]),
+                "description": f"{plan_id} days access"
             }
         ) as response:
             r = await response.json()
@@ -230,4 +232,65 @@ async def crypto_confirm(call: CallbackQuery):
         await call.message.answer("❌ Ошибка CryptoPay")
         return
 
-    pay_url = r["result"]["pay_url"]
+    url = r["result"]["pay_url"]
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💰 Оплатить USDT", url=url)],
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="crypto")]
+    ])
+
+    await call.message.edit_text(f"💰 Оплата подписки на {PLANS[plan_id]['name']} через CryptoBot", reply_markup=kb)
+    await call.answer()
+
+# --- CHECKOUT ---
+
+@router.pre_checkout_query()
+async def pre_checkout(pre: PreCheckoutQuery):
+    await pre.answer(ok=True)
+
+@router.message(F.successful_payment)
+async def success(message: Message):
+    await message.answer("✅ Оплата прошла! Доступ активирован.")
+
+# --- OTHER ---
+
+@router.callback_query(F.data == "ref")
+async def ref(call: CallbackQuery):
+    text = (
+        "👥 РЕФЕРАЛЬНАЯ СИСТЕМА\n\n"
+        "Пригласи друга и получи +7 дней доступа\n\n"
+        f"Твоя ссылка:\nhttps://t.me/your_bot?start={call.from_user.id}"
+    )
+    await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
+    ]))
+    await call.answer()
+
+@router.callback_query(F.data == "info")
+async def info(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📄 Политика конфиденциальности", callback_data="privacy")],
+        [InlineKeyboardButton(text="📜 Пользовательское соглашение", callback_data="terms")],
+        [InlineKeyboardButton(text="💬 Поддержка", url="https://t.me/mistybibi")],
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
+    ])
+    await call.message.edit_text("ℹ️ Информация", reply_markup=kb)
+    await call.answer()
+
+@router.callback_query(F.data == "privacy")
+async def privacy(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅ Назад", callback_data="info")]])
+    await call.message.edit_text(PRIVACY_TEXT, reply_markup=kb)
+    await call.answer()
+
+@router.callback_query(F.data == "terms")
+async def terms(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅ Назад", callback_data="info")]])
+    await call.message.edit_text(TERMS_TEXT, reply_markup=kb)
+    await call.answer()
+
+# ================== MAIN ==================
+async def main():
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
