@@ -81,7 +81,7 @@ async def extend_user(user_id, days):
             row = await cur.fetchone()
 
         if row and row[0]:
-            current = datetime.fromisoformat(row[0])
+            current = datetime.fromisoformat(row[0]).replace(tzinfo=timezone.utc)
             base = max(datetime.now(timezone.utc), current)
         else:
             base = datetime.now(timezone.utc)
@@ -259,7 +259,7 @@ async def crypto_pay(call: CallbackQuery):
             json={
                 "asset": "USDT",
                 "amount": str(plan["crypto"]),
-                "description": "Subscription"
+                "description": f"Subscription {plan['name']}"
             }
         ) as resp:
             data = await resp.json()
@@ -284,9 +284,10 @@ async def crypto_pay(call: CallbackQuery):
                 [InlineKeyboardButton(text="⬅ Назад", callback_data="crypto")]
             ])
         )
+
     except Exception as e:
         logging.error(f"Crypto pay error: {e}")
-        await call.answer("Сервис оплаты временно недоступен")
+        await call.answer("Сервис временно недоступен")
 
 # ================== JOIN ==================
 @router.chat_join_request()
@@ -294,13 +295,62 @@ async def join(req: ChatJoinRequest):
     user = await get_user(req.from_user.id)
 
     if user and user[1]:
-        if datetime.fromisoformat(user[1]) > datetime.now(timezone.utc):
+        if datetime.fromisoformat(user[1]).replace(tzinfo=timezone.utc) > datetime.now(timezone.utc):
             await req.approve()
             return
 
     await req.decline()
 
-# ================== CHECKERS ==================
+# ================== CRYPTO CHECKER ==================
 async def crypto_checker():
     while True:
-        await asyncio.sleep(
+        try:
+            async with aiosqlite.connect(DB_NAME) as db:
+                async with db.execute("""
+                    SELECT invoice_id, user_id, plan_id
+                    FROM crypto_invoices
+                    WHERE status='pending'
+                """) as cur:
+                    invoices = await cur.fetchall()
+
+            for invoice_id, user_id, plan_id in invoices:
+                async with http_session.get(
+                    f"https://pay.crypt.bot/api/getInvoices?invoice_ids={invoice_id}",
+                    headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN}
+                ) as resp:
+                    data = await resp.json()
+
+                if data.get("ok"):
+                    item = data["result"]["items"][0]
+
+                    if item["status"] == "paid":
+                        await extend_user(user_id, PLANS[plan_id]["days"])
+
+                        async with aiosqlite.connect(DB_NAME) as db:
+                            await db.execute("""
+                                UPDATE crypto_invoices
+                                SET status='paid'
+                                WHERE invoice_id=?
+                            """, (invoice_id,))
+                            await db.commit()
+
+        except Exception as e:
+            logging.error(f"crypto_checker error: {e}")
+
+        await asyncio.sleep(20)
+
+# ================== MAIN ==================
+async def main():
+    global http_session
+    http_session = aiohttp.ClientSession()
+
+    await init_db()
+
+    asyncio.create_task(crypto_checker())
+
+    await dp.start_polling(bot)
+
+    await http_session.close()
+
+if __name__ == "__main__":
+    asyncio.run(main())
