@@ -70,6 +70,30 @@ async def back(call: CallbackQuery):
     await call.answer()
 
 # ================== STARS ==================
+@router.callback_query(F.data == "stars")
+async def stars(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="1 день", callback_data="stars:1")],
+        [InlineKeyboardButton(text="7 дней", callback_data="stars:7")],
+        [InlineKeyboardButton(text="30 дней", callback_data="stars:30")],
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
+    ])
+    await call.message.edit_text("⭐ Stars тарифы", reply_markup=kb)
+    await call.answer()
+
+# ================== CRYPTO MENU ==================
+@router.callback_query(F.data == "crypto")
+async def crypto(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="1 день", callback_data="crypto:1")],
+        [InlineKeyboardButton(text="7 дней", callback_data="crypto:7")],
+        [InlineKeyboardButton(text="30 дней", callback_data="crypto:30")],
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
+    ])
+    await call.message.edit_text("💰 Crypto тарифы", reply_markup=kb)
+    await call.answer()
+
+# ================== STARS PAY ==================
 @router.callback_query(F.data.startswith("stars:"))
 async def stars_select(call: CallbackQuery):
     plan = call.data.split(":")[1]
@@ -80,11 +104,20 @@ async def stars_select(call: CallbackQuery):
     ])
 
     await call.message.edit_text(
-        f"⭐ Вы выбрали {plan} дней подписки\n\nНажмите оплатить для продолжения.",
+        f"⭐ Вы выбрали {plan} дней подписки\n\nНажмите оплатить.",
         reply_markup=kb
     )
     await call.answer()
 
+# ================== PRECHECKOUT ==================
+@router.pre_checkout_query()
+async def pre_checkout(pre: PreCheckoutQuery):
+    await pre.answer(ok=True)
+
+# ================== SUCCESS ==================
+@router.message(F.successful_payment)
+async def success(message: Message):
+    await message.answer("✅ Оплата прошла! Доступ активирован.")
 
 @router.callback_query(F.data.startswith("stars_pay:"))
 async def stars_pay(call: CallbackQuery):
@@ -101,23 +134,6 @@ async def stars_pay(call: CallbackQuery):
     )
 
     await call.answer()
-
-
-@router.callback_query(F.data.startswith("crypto:"))
-async def crypto_select(call: CallbackQuery):
-    plan = call.data.split(":")[1]
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Оплатить", callback_data=f"crypto_pay:{plan}")],
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="crypto")]
-    ])
-
-    await call.message.edit_text(
-        f"💰 Вы выбрали {plan} дней подписки\n\nНажмите оплатить для продолжения.",
-        reply_markup=kb
-    )
-    await call.answer()
-
 
 @router.callback_query(F.data.startswith("crypto_pay:"))
 async def crypto_pay(call: CallbackQuery):
@@ -138,66 +154,22 @@ async def crypto_pay(call: CallbackQuery):
         await call.message.answer("❌ Ошибка создания инвойса")
         return
 
-    await call.message.answer(f"💰 Оплата:\n{r['result']['pay_url']}")
+    await call.message.answer(r["result"]["pay_url"])
     await call.answer()
-
-# ================== CRYPTO MENU ==================
-
-
-# ================== STARS PAY ==================
-@router.callback_query(F.data.startswith("stars:"))
-async def stars_pay(call: CallbackQuery):
-    plan = call.data.split(":")[1]
-
-    await bot.send_invoice(
-        chat_id=call.message.chat.id,
-        title="Подписка",
-        description=f"{plan} дней доступа",
-        payload=f"stars_{plan}",
-        provider_token="",
-        currency="XTR",
-        prices=[LabeledPrice(label="Access", amount=PLANS[plan]["stars"])]
-    )
-
-    await call.answer()
-
-# ================== PRECHECKOUT ==================
-@router.pre_checkout_query()
-async def pre_checkout(pre: PreCheckoutQuery):
-    await pre.answer(ok=True)
-
-# ================== SUCCESS ==================
-@router.message(F.successful_payment)
-async def success(message: Message):
-    await message.answer("✅ Оплата прошла! Доступ активирован.")
-
 # ================== CRYPTO ==================
 @router.callback_query(F.data.startswith("crypto:"))
-async def crypto_pay(call: CallbackQuery):
+async def crypto_select(call: CallbackQuery):
     plan = call.data.split(":")[1]
-    amount = PLANS[plan]["crypto"]
 
-    r = requests.post(
-        "https://pay.crypt.bot/api/createInvoice",
-        headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
-        json={
-            "asset": "USDT",
-            "amount": amount,
-            "description": f"{plan} days access"
-        }
-    ).json()
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 Оплатить", callback_data=f"crypto_pay:{plan}")],
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="crypto")]
+    ])
 
-    if not r.get("ok"):
-        await call.message.answer("❌ Ошибка создания инвойса")
-        await call.answer()
-        return
-
-    invoice = r["result"]
-
-    await call.message.answer(
-        f"💰 Оплата через Crypto Bot:\n\n{invoice['pay_url']}"
+    await call.message.edit_text(
+        f"💰 Вы выбрали {plan} дней подписки\n\nНажмите оплатить.",
+        reply_markup=kb
     )
-
     await call.answer()
 
 # ================== REF ==================
