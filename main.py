@@ -14,7 +14,6 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
     LabeledPrice,
-    PreCheckoutQuery,
     ChatJoinRequest,
 )
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -62,13 +61,6 @@ async def init_db():
         )
         """)
 
-        await db.execute("""
-        CREATE TABLE IF NOT EXISTS system (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        )
-        """)
-
         await db.commit()
 
 
@@ -76,7 +68,8 @@ async def init_db():
 async def get_user(user_id):
     async with aiosqlite.connect(DB_NAME) as db:
         async with db.execute(
-            "SELECT * FROM users WHERE user_id=?", (user_id,)
+            "SELECT * FROM users WHERE user_id=?",
+            (user_id,)
         ) as cur:
             return await cur.fetchone()
 
@@ -84,7 +77,8 @@ async def get_user(user_id):
 async def extend_user(user_id, days):
     async with aiosqlite.connect(DB_NAME) as db:
         async with db.execute(
-            "SELECT expiry FROM users WHERE user_id=?", (user_id,)
+            "SELECT expiry FROM users WHERE user_id=?",
+            (user_id,)
         ) as cur:
             row = await cur.fetchone()
 
@@ -105,22 +99,22 @@ async def extend_user(user_id, days):
         await db.commit()
 
 
-async def mark_invoice_used(invoice_id: str):
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute(
-            "UPDATE crypto_invoices SET status='paid' WHERE invoice_id=?",
-            (invoice_id,)
-        )
-        await db.commit()
-
-
-async def invoice_exists(invoice_id: str):
+async def invoice_used(invoice_id: str):
     async with aiosqlite.connect(DB_NAME) as db:
         async with db.execute(
             "SELECT status FROM crypto_invoices WHERE invoice_id=?",
             (invoice_id,)
         ) as cur:
             return await cur.fetchone()
+
+
+async def mark_paid(invoice_id: str):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            "UPDATE crypto_invoices SET status='paid' WHERE invoice_id=?",
+            (invoice_id,)
+        )
+        await db.commit()
 
 
 # ================== PLANS ==================
@@ -141,9 +135,17 @@ def menu():
         ],
         [
             InlineKeyboardButton(text="👥 Реферал", callback_data="ref"),
+        ],
+        [
+            InlineKeyboardButton(text="ℹ️ Информация", callback_data="info"),
+            InlineKeyboardButton(text="💬 Поддержка", url="https://t.me/mistybibi"),
         ]
     ])
 
+
+BACK_BTN = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
+])
 
 # ================== START ==================
 @router.message(CommandStart())
@@ -169,13 +171,40 @@ async def ref(call: CallbackQuery):
 
     await call.message.edit_text(
         f"👥 Твоя ссылка:\n<code>{link}</code>",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
-        ]),
+        reply_markup=BACK_BTN,
         parse_mode="HTML"
     )
 
 
+# ================== INFO ==================
+@router.callback_query(F.data == "info")
+async def info(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📄 Политика", callback_data="privacy")],
+        [InlineKeyboardButton(text="⚖️ Условия", callback_data="terms")],
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
+    ])
+
+    await call.message.edit_text("ℹ️ Информация:", reply_markup=kb)
+
+
+@router.callback_query(F.data == "privacy")
+async def privacy(call: CallbackQuery):
+    await call.message.edit_text(
+        "📄 Политика конфиденциальности",
+        reply_markup=BACK_BTN
+    )
+
+
+@router.callback_query(F.data == "terms")
+async def terms(call: CallbackQuery):
+    await call.message.edit_text(
+        "⚖️ Условия использования",
+        reply_markup=BACK_BTN
+    )
+
+
+# ================== BACK ==================
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=menu())
@@ -188,7 +217,7 @@ async def stars(call: CallbackQuery):
         [InlineKeyboardButton(text=f"{p['name']} — {p['stars']} ⭐",
                               callback_data=f"stars:{k}")]
         for k, p in PLANS.items()
-    ])
+    ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
 
     await call.message.edit_text("⭐ Выбери тариф:", reply_markup=kb)
 
@@ -210,7 +239,8 @@ async def stars_pay(call: CallbackQuery):
     await call.message.edit_text(
         f"💰 {plan['stars']} ⭐",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Оплатить", url=link)]
+            [InlineKeyboardButton(text="Оплатить", url=link)],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
         ])
     )
 
@@ -222,7 +252,7 @@ async def crypto(call: CallbackQuery):
         [InlineKeyboardButton(text=f"{p['name']} — {p['crypto']}$",
                               callback_data=f"crypto:{k}")]
         for k, p in PLANS.items()
-    ])
+    ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
 
     await call.message.edit_text("💰 Crypto:", reply_markup=kb)
 
@@ -260,85 +290,12 @@ async def crypto_pay(call: CallbackQuery):
     await call.message.edit_text(
         f"💰 {plan['crypto']} $",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Оплатить", url=inv["pay_url"])]
+            [InlineKeyboardButton(text="Оплатить", url=inv["pay_url"])],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="crypto")]
         ])
     )
 
 
-# ================== PAYMENT SUCCESS ==================
+# ================== PAYMENT ==================
 @router.message(F.successful_payment)
-async def paid(message: Message):
-    plan_id = message.successful_payment.invoice_payload.split("_")[1]
-
-    await extend_user(message.from_user.id, PLANS[plan_id]["days"])
-
-    await message.answer("✅ Доступ выдан")
-
-
-# ================== JOIN REQUEST ==================
-@router.chat_join_request()
-async def join(req: ChatJoinRequest):
-    user = await get_user(req.from_user.id)
-
-    if user and user[1] and datetime.fromisoformat(user[1]) > datetime.utcnow():
-        await req.approve()
-    else:
-        await req.decline()
-        try:
-            await bot.send_message(req.from_user.id, "❌ Нет подписки")
-        except:
-            pass
-
-
-# ================== CRYPTO CHECK ==================
-async def crypto_checker():
-    while True:
-        await asyncio.sleep(25)
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    "https://pay.crypt.bot/api/getInvoices",
-                    headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN}
-                ) as resp:
-                    data = await resp.json()
-
-            if not data.get("ok"):
-                continue
-
-            async with aiosqlite.connect(DB_NAME) as db:
-                for inv in data["result"]["items"]:
-                    if inv["status"] != "paid":
-                        continue
-
-                    exists = await invoice_exists(str(inv["invoice_id"]))
-                    if not exists or exists[0] == "paid":
-                        continue
-
-                    await mark_invoice_used(str(inv["invoice_id"]))
-
-                    async with db.execute(
-                        "SELECT user_id, plan_id FROM crypto_invoices WHERE invoice_id=?",
-                        (str(inv["invoice_id"]),)
-                    ) as cur:
-                        row = await cur.fetchone()
-
-                    if row:
-                        await extend_user(row[0], PLANS[row[1]]["days"])
-                        await bot.send_message(row[0], "✅ Оплата принята")
-
-        except Exception as e:
-            logging.error(f"crypto_checker: {e}")
-
-
-# ================== MAIN ==================
-async def main():
-    await init_db()
-
-    asyncio.create_task(crypto_checker())
-
-    await dp.start_polling(bot)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+async def paid(message: Message
