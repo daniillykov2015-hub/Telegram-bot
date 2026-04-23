@@ -196,7 +196,7 @@ async def stars_confirm(call: CallbackQuery):
     await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     await call.answer()
 
-# --- CRYPTO LOGIC (ВИЗУАЛ КАК В STARS) ---
+# --- CRYPTO LOGIC ---
 
 @router.callback_query(F.data == "crypto")
 async def crypto_menu(call: CallbackQuery):
@@ -232,7 +232,6 @@ async def crypto_confirm(call: CallbackQuery):
 
     pay_url = r["result"]["pay_url"]
 
-    # Обновленный текст для Crypto (визуал 1-в-1 как Stars)
     text = (
         "<b>Проверьте детали платежа:</b>\n\n"
         f"📦 Тариф: {plan['name']}\n"
@@ -265,29 +264,20 @@ async def success(message: Message):
 @router.callback_query(F.data == "ref")
 async def ref(call: CallbackQuery):
     text = (
-        "👥 РЕФЕРАЛЬНАЯ СИСТЕМА\n\n"
-        "Пригласи друга и получи +7 дней доступа\n\n"
-    👥 ПРИГЛАСИ ДРУГА — ПОЛУЧИ +7 ДНЕЙ!
-
-Хочешь пользоваться закрытым каналом дольше и бесплатно? Участвуй в нашей реферальной программе!
-
-Как это работает:
-
-Копируй свою уникальную ссылку ниже.
-
-Отправь её другу.
-
-Как только твой друг оплатит любую подписку, тебе автоматически начислится 7 дней бесплатного доступа!
-
-⚠️ Важное условие:
-Бонус начисляется только в том случае, если на момент приглашения у тебя есть активная подписка.
-
-Твоя ссылка для приглашения:
-https://t.me/your_bot?start={user_id}
+        "<b>👥 ПРИГЛАСИ ДРУГА — ПОЛУЧИ +7 ДНЕЙ!</b>\n\n"
+        "Хочешь пользоваться закрытым каналом дольше и бесплатно? Участвуй в нашей реферальной программе!\n\n"
+        "<b>Как это работает:</b>\n"
+        "1. Копируй свою уникальную ссылку ниже.\n"
+        "2. Отправь её другу.\n"
+        "3. Как только твой друг <b>оплатит любую подписку</b>, тебе автоматически начислится <b>7 дней бесплатного доступа!</b>\n\n"
+        "<b>⚠️ Важное условие:</b>\n"
+        "Бонус начисляется только в том случае, если на момент приглашения у тебя есть активная подписка.\n\n"
+        "<b>Твоя ссылка для приглашения:</b>\n"
+        f"<code>https://t.me/your_bot?start={call.from_user.id}</code>"
     )
     await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
-    ]))
+    ]), parse_mode="HTML")
     await call.answer()
 
 @router.callback_query(F.data == "info")
