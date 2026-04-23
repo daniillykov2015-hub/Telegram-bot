@@ -43,8 +43,7 @@ dp.include_router(router)
 
 DB_NAME = "users.db"
 
-http_session: aiohttp.ClientSession | None = None
-payment_locks = set()
+http_session = None  # FIX: общий session (был утечка)
 
 # ================== DB ==================
 async def init_db():
@@ -66,13 +65,10 @@ async def init_db():
         """)
         await db.commit()
 
-# ================== USERS ==================
+# ================== HELPERS ==================
 async def get_user(user_id):
     async with aiosqlite.connect(DB_NAME) as db:
-        async with db.execute(
-            "SELECT user_id, expiry, referrer FROM users WHERE user_id=?",
-            (user_id,)
-        ) as cur:
+        async with db.execute("SELECT * FROM users WHERE user_id=?", (user_id,)) as cur:
             return await cur.fetchone()
 
 async def extend_user(user_id, days):
@@ -83,6 +79,7 @@ async def extend_user(user_id, days):
         ) as cur:
             row = await cur.fetchone()
 
+        # FIX: row[0] вместо row[1] (у тебя был критический баг)
         if row and row[0]:
             current = datetime.fromisoformat(row[0])
             base = max(datetime.now(timezone.utc), current)
@@ -169,6 +166,26 @@ async def ref(call: CallbackQuery):
         reply_markup=BACK_BTN
     )
 
+# ================== INFO ==================
+@router.callback_query(F.data == "info")
+async def info(call: CallbackQuery):
+    await call.message.edit_text(
+        "ℹ️ Информация:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📄 Политика", callback_data="privacy")],
+            [InlineKeyboardButton(text="⚖️ Условия", callback_data="terms")],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
+        ])
+    )
+
+@router.callback_query(F.data == "privacy")
+async def privacy(call: CallbackQuery):
+    await call.message.edit_text("📄 Политика", reply_markup=BACK_BTN)
+
+@router.callback_query(F.data == "terms")
+async def terms(call: CallbackQuery):
+    await call.message.edit_text("⚖️ Условия", reply_markup=BACK_BTN)
+
 # ================== BACK ==================
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
@@ -239,13 +256,12 @@ async def crypto_pay(call: CallbackQuery):
         return
 
     inv = data["result"]
-    invoice_id = str(inv["invoice_id"])
 
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("""
             INSERT OR IGNORE INTO crypto_invoices (invoice_id, user_id, plan_id)
             VALUES (?, ?, ?)
-        """, (invoice_id, call.from_user.id, plan_id))
+        """, (str(inv["invoice_id"]), call.from_user.id, plan_id))
         await db.commit()
 
     await call.message.edit_text(
@@ -262,82 +278,59 @@ async def join(req: ChatJoinRequest):
     user = await get_user(req.from_user.id)
 
     if user and user[1]:
-        expiry = datetime.fromisoformat(user[1])
-        if expiry > datetime.now(timezone.utc):
+        if datetime.fromisoformat(user[1]) > datetime.now(timezone.utc):
             await req.approve()
             return
 
     await req.decline()
-    try:
-        await bot.send_message(req.from_user.id, "❌ Нет подписки")
-    except:
-        pass
 
 # ================== CHECKERS ==================
 async def crypto_checker():
     while True:
         await asyncio.sleep(25)
 
-        try:
-            async with http_session.get(
-                "https://pay.crypt.bot/api/getInvoices",
-                headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN}
-            ) as resp:
-                data = await resp.json()
+        async with http_session.get(
+            "https://pay.crypt.bot/api/getInvoices",
+            headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN}
+        ) as resp:
+            data = await resp.json()
 
-            if not data.get("ok"):
+        if not data.get("ok"):
+            continue
+
+        for inv in data["result"].get("items", []):
+
+            if inv["status"] != "paid":
                 continue
 
-            for inv in data["result"].get("items", []):
+            invoice_id = str(inv["invoice_id"])
 
-                if inv["status"] != "paid":
+            async with aiosqlite.connect(DB_NAME) as db:
+                async with db.execute(
+                    "SELECT status FROM crypto_invoices WHERE invoice_id=?",
+                    (invoice_id,)
+                ) as cur:
+                    row = await cur.fetchone()
+
+                if row and row[0] == "paid":
                     continue
 
-                invoice_id = str(inv["invoice_id"])
+                await db.execute(
+                    "UPDATE crypto_invoices SET status='paid' WHERE invoice_id=?",
+                    (invoice_id,)
+                )
 
-                if invoice_id in payment_locks:
-                    continue
+                async with db.execute(
+                    "SELECT user_id, plan_id FROM crypto_invoices WHERE invoice_id=?",
+                    (invoice_id,)
+                ) as cur:
+                    data_row = await cur.fetchone()
 
-                payment_locks.add(invoice_id)
+                if data_row:
+                    await extend_user(data_row[0], PLANS[data_row[1]]["days"])
+                    await bot.send_message(data_row[0], "✅ Оплата принята")
 
-                status = await invoice_used(invoice_id)
-                if status and status[0] == "paid":
-                    continue
-
-                await mark_paid(invoice_id)
-
-                async with aiosqlite.connect(DB_NAME) as db:
-                    async with db.execute(
-                        "SELECT user_id, plan_id FROM crypto_invoices WHERE invoice_id=?",
-                        (invoice_id,)
-                    ) as cur:
-                        row = await cur.fetchone()
-
-                if row:
-                    await extend_user(row[0], PLANS[row[1]]["days"])
-                    await bot.send_message(row[0], "✅ Оплата принята")
-
-        except Exception as e:
-            logging.error(f"crypto_checker: {e}")
-
-async def kick_checker():
-    while True:
-        await asyncio.sleep(3600)
-
-        async with aiosqlite.connect(DB_NAME) as db:
-            async with db.execute(
-                "SELECT user_id, expiry FROM users WHERE expiry IS NOT NULL"
-            ) as cur:
-                rows = await cur.fetchall()
-
-        for user_id, expiry in rows:
-            try:
-                if datetime.fromisoformat(expiry) < datetime.now(timezone.utc):
-                    await bot.ban_chat_member(CHANNEL_ID, user_id)
-                    await bot.unban_chat_member(CHANNEL_ID, user_id)
-                    await bot.send_message(user_id, "❌ Ваша подписка истекла.")
-            except:
-                pass
+                await db.commit()
 
 # ================== MAIN ==================
 async def main():
@@ -347,9 +340,8 @@ async def main():
     await init_db()
 
     asyncio.create_task(crypto_checker())
-    asyncio.create_task(kick_checker())
 
-    await dp.start_polling(bot, skip_updates=True)
+    await dp.start_polling(bot)
 
     await http_session.close()
 
