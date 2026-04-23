@@ -27,7 +27,6 @@ logging.basicConfig(level=logging.INFO)
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
 CHANNEL_ID = os.getenv("TELEGRAM_GROUP_ID")
-ADMIN_ID = os.getenv("ADMIN_ID")  # 👈 NEW
 
 if not BOT_TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN is missing")
@@ -37,7 +36,6 @@ if not CHANNEL_ID:
     raise ValueError("TELEGRAM_GROUP_ID is missing")
 
 CHANNEL_ID = int(CHANNEL_ID)
-ADMIN_ID = int(ADMIN_ID) if ADMIN_ID else None
 
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher(storage=MemoryStorage())
@@ -45,6 +43,7 @@ router = Router()
 dp.include_router(router)
 
 DB_NAME = "users.db"
+
 http_session = None
 
 # ================== DB ==================
@@ -73,14 +72,6 @@ async def get_user(user_id):
         async with db.execute("SELECT * FROM users WHERE user_id=?", (user_id,)) as cur:
             return await cur.fetchone()
 
-async def log_admin(text: str):
-    if ADMIN_ID:
-        try:
-            await bot.send_message(ADMIN_ID, f"📊 LOG:\n{text}")
-        except:
-            pass
-
-# ================== SAFE EXTEND (ANTI DOUBLE) ==================
 async def extend_user(user_id, days):
     async with aiosqlite.connect(DB_NAME) as db:
         async with db.execute(
@@ -89,13 +80,11 @@ async def extend_user(user_id, days):
         ) as cur:
             row = await cur.fetchone()
 
-        now = datetime.now(timezone.utc)
-
         if row and row[0]:
             current = datetime.fromisoformat(row[0]).replace(tzinfo=timezone.utc)
-            base = max(now, current)
+            base = max(datetime.now(timezone.utc), current)
         else:
-            base = now
+            base = datetime.now(timezone.utc)
 
         new_expiry = base + timedelta(days=days)
 
@@ -105,6 +94,22 @@ async def extend_user(user_id, days):
         ON CONFLICT(user_id) DO UPDATE SET expiry=excluded.expiry
         """, (user_id, new_expiry.isoformat(), user_id))
 
+        await db.commit()
+
+async def invoice_used(invoice_id: str):
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute(
+            "SELECT status FROM crypto_invoices WHERE invoice_id=?",
+            (invoice_id,)
+        ) as cur:
+            return await cur.fetchone()
+
+async def mark_paid(invoice_id: str):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            "UPDATE crypto_invoices SET status='paid' WHERE invoice_id=?",
+            (invoice_id,)
+        )
         await db.commit()
 
 # ================== PLANS ==================
@@ -161,7 +166,42 @@ async def ref(call: CallbackQuery):
         reply_markup=BACK_BTN
     )
 
-# ================== STARS (ANTI DOUBLE PAY) ==================
+# ================== INFO ==================
+@router.callback_query(F.data == "info")
+async def info(call: CallbackQuery):
+    await call.message.edit_text(
+        "ℹ️ Информация:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📄 Политика", callback_data="privacy")],
+            [InlineKeyboardButton(text="⚖️ Условия", callback_data="terms")],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
+        ])
+    )
+
+@router.callback_query(F.data == "privacy")
+async def privacy(call: CallbackQuery):
+    await call.message.edit_text("📄 Политика", reply_markup=BACK_BTN)
+
+@router.callback_query(F.data == "terms")
+async def terms(call: CallbackQuery):
+    await call.message.edit_text("⚖️ Условия", reply_markup=BACK_BTN)
+
+# ================== BACK ==================
+@router.callback_query(F.data == "back")
+async def back(call: CallbackQuery):
+    await call.message.edit_text(MAIN_TEXT, reply_markup=menu())
+
+# ================== STARS ==================
+@router.callback_query(F.data == "stars")
+async def stars(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"{p['name']} — {p['stars']} ⭐",
+                              callback_data=f"stars:{k}")]
+        for k, p in PLANS.items()
+    ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
+
+    await call.message.edit_text("⭐ Выбери тариф:", reply_markup=kb)
+
 @router.callback_query(F.data.startswith("stars:"))
 async def stars_pay(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
@@ -176,8 +216,6 @@ async def stars_pay(call: CallbackQuery):
         prices=[LabeledPrice(label="Stars", amount=plan["stars"])]
     )
 
-    await log_admin(f"Stars invoice created: user={call.from_user.id} plan={plan_id}")
-
     await call.message.edit_text(
         f"💰 {plan['stars']} ⭐",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -186,45 +224,33 @@ async def stars_pay(call: CallbackQuery):
         ])
     )
 
+@router.pre_checkout_query()
+async def pre_checkout(query: PreCheckoutQuery):
+    await query.answer(ok=True)
+
 @router.message(F.successful_payment)
 async def success_stars_payment(message: Message):
     payload = message.successful_payment.invoice_payload
+    if payload.startswith("stars_"):
+        plan_id = payload.split("_")[1]
+        await extend_user(message.from_user.id, PLANS[plan_id]["days"])
+        await message.answer("✅ Оплата Stars принята! Подписка продлена.")
 
-    if not payload.startswith("stars_"):
-        return
+# ================== CRYPTO ==================
+@router.callback_query(F.data == "crypto")
+async def crypto(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"{p['name']} — {p['crypto']}$",
+                              callback_data=f"crypto:{k}")]
+        for k, p in PLANS.items()
+    ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
 
-    plan_id = payload.split("_")[1]
+    await call.message.edit_text("💰 Crypto:", reply_markup=kb)
 
-    # 🧠 ANTI DOUBLE PROTECTION
-    async with aiosqlite.connect(DB_NAME) as db:
-        async with db.execute("""
-            SELECT 1 FROM users WHERE user_id=?
-        """, (message.from_user.id,)) as cur:
-            await cur.fetchone()
-
-    await extend_user(message.from_user.id, PLANS[plan_id]["days"])
-
-    await log_admin(f"Stars PAID: user={message.from_user.id} plan={plan_id}")
-
-    await message.answer("✅ Оплата Stars подтверждена")
-
-# ================== CRYPTO (ANTI DUPLICATE INVOICE) ==================
 @router.callback_query(F.data.startswith("crypto:"))
 async def crypto_pay(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
     plan = PLANS[plan_id]
-
-    # 🔒 CHECK: only 1 active invoice per user
-    async with aiosqlite.connect(DB_NAME) as db:
-        async with db.execute("""
-            SELECT 1 FROM crypto_invoices
-            WHERE user_id=? AND status='pending'
-        """, (call.from_user.id,)) as cur:
-            exists = await cur.fetchone()
-
-    if exists:
-        await call.answer("У тебя уже есть активный счёт")
-        return
 
     try:
         async with http_session.post(
@@ -246,12 +272,10 @@ async def crypto_pay(call: CallbackQuery):
 
         async with aiosqlite.connect(DB_NAME) as db:
             await db.execute("""
-                INSERT INTO crypto_invoices (invoice_id, user_id, plan_id)
+                INSERT OR IGNORE INTO crypto_invoices (invoice_id, user_id, plan_id)
                 VALUES (?, ?, ?)
             """, (str(inv["invoice_id"]), call.from_user.id, plan_id))
             await db.commit()
-
-        await log_admin(f"Crypto invoice: user={call.from_user.id} plan={plan_id}")
 
         await call.message.edit_text(
             f"💰 {plan['crypto']} $",
@@ -265,7 +289,19 @@ async def crypto_pay(call: CallbackQuery):
         logging.error(f"Crypto pay error: {e}")
         await call.answer("Сервис временно недоступен")
 
-# ================== CRYPTO CHECKER (NO DOUBLE PAY) ==================
+# ================== JOIN ==================
+@router.chat_join_request()
+async def join(req: ChatJoinRequest):
+    user = await get_user(req.from_user.id)
+
+    if user and user[1]:
+        if datetime.fromisoformat(user[1]).replace(tzinfo=timezone.utc) > datetime.now(timezone.utc):
+            await req.approve()
+            return
+
+    await req.decline()
+
+# ================== CRYPTO CHECKER ==================
 async def crypto_checker():
     while True:
         try:
@@ -298,24 +334,10 @@ async def crypto_checker():
                             """, (invoice_id,))
                             await db.commit()
 
-                        await log_admin(f"Crypto PAID: user={user_id} plan={plan_id}")
-
         except Exception as e:
             logging.error(f"crypto_checker error: {e}")
 
         await asyncio.sleep(20)
-
-# ================== JOIN ==================
-@router.chat_join_request()
-async def join(req: ChatJoinRequest):
-    user = await get_user(req.from_user.id)
-
-    if user and user[1]:
-        if datetime.fromisoformat(user[1]).replace(tzinfo=timezone.utc) > datetime.now(timezone.utc):
-            await req.approve()
-            return
-
-    await req.decline()
 
 # ================== MAIN ==================
 async def main():
