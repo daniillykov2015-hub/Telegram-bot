@@ -98,15 +98,16 @@ async def crypto(call: CallbackQuery):
 async def stars_select(call: CallbackQuery):
     plan = call.data.split(":")[1]
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Оплатить", callback_data=f"stars_pay:{plan}")],
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
-    ])
-
-    await call.message.edit_text(
-        f"⭐ Вы выбрали {plan} дней подписки\n\nНажмите оплатить.",
-        reply_markup=kb
+    await bot.send_invoice(
+        chat_id=call.message.chat.id,
+        title="Подписка",
+        description=f"{plan} дней доступа",
+        payload=f"stars_{plan}",
+        provider_token="",
+        currency="XTR",
+        prices=[LabeledPrice(label="Access", amount=PLANS[plan]["stars"])]
     )
+
     await call.answer()
 
 # ================== PRECHECKOUT ==================
@@ -135,26 +136,36 @@ async def stars_pay(call: CallbackQuery):
 
     await call.answer()
 
-@router.callback_query(F.data.startswith("crypto_pay:"))
-async def crypto_pay(call: CallbackQuery):
+@router.callback_query(F.data.startswith("crypto:"))
+async def crypto_select(call: CallbackQuery):
     plan = call.data.split(":")[1]
-    amount = PLANS[plan]["crypto"]
 
     r = requests.post(
         "https://pay.crypt.bot/api/createInvoice",
         headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
         json={
             "asset": "USDT",
-            "amount": amount,
+            "amount": PLANS[plan]["crypto"],
             "description": f"{plan} days access"
         }
     ).json()
 
     if not r.get("ok"):
-        await call.message.answer("❌ Ошибка создания инвойса")
+        await call.message.answer("❌ Ошибка создания оплаты")
         return
 
-    await call.message.answer(r["result"]["pay_url"])
+    url = r["result"]["pay_url"]
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💰 Оплатить", url=url)],
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="crypto")]
+    ])
+
+    await call.message.edit_text(
+        f"💰 Оплата {plan} дней подписки",
+        reply_markup=kb
+    )
+
     await call.answer()
 # ================== CRYPTO ==================
 @router.callback_query(F.data.startswith("crypto:"))
