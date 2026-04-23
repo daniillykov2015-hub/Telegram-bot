@@ -19,6 +19,7 @@ from aiogram.types import (
 )
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
+from aiogram.exceptions import TelegramBadRequest
 
 # ================== CONFIG ==================
 logging.basicConfig(level=logging.INFO)
@@ -362,6 +363,7 @@ async def join(req: ChatJoinRequest):
             return
     await req.decline()
 
+# --- BACKGROUND TASKS ---
 async def crypto_checker():
     while True:
         try:
@@ -380,14 +382,47 @@ async def crypto_checker():
                         await db.execute("UPDATE crypto_invoices SET status='paid' WHERE invoice_id=?", (inv_id,))
                         await db.commit()
         except Exception as e:
-            logging.error(f"Checker error: {e}")
+            logging.error(f"Crypto checker error: {e}")
         await asyncio.sleep(20)
+
+async def check_subscriptions():
+    while True:
+        try:
+            async with aiosqlite.connect(DB_NAME) as db:
+                async with db.execute("SELECT user_id, expiry FROM users WHERE expiry IS NOT NULL") as cur:
+                    users = await cur.fetchall()
+
+            now = datetime.now(timezone.utc)
+            for user_id, expiry_str in users:
+                expiry_dt = datetime.fromisoformat(expiry_str).replace(tzinfo=timezone.utc)
+                
+                if now > expiry_dt:
+                    try:
+                        await bot.ban_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
+                        await bot.unban_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
+                        
+                        async with aiosqlite.connect(DB_NAME) as db:
+                            await db.execute("UPDATE users SET expiry = NULL WHERE user_id = ?", (user_id,))
+                            await db.commit()
+                            
+                        await bot.send_message(user_id, "❌ Срок вашей подписки истёк. Вы были удалены из канала. Чтобы вернуться, оплатите подписку снова.")
+                        logging.info(f"User {user_id} was removed due to expiry.")
+                    except TelegramBadRequest as e:
+                        if "user is not found in the chat" not in e.message:
+                            logging.error(f"Error banning user {user_id}: {e}")
+        except Exception as e:
+            logging.error(f"Subscription checker error: {e}")
+        
+        await asyncio.sleep(3600)
 
 async def main():
     global http_session
     http_session = aiohttp.ClientSession()
     await init_db()
+    
     asyncio.create_task(crypto_checker())
+    asyncio.create_task(check_subscriptions())
+    
     await dp.start_polling(bot)
     await http_session.close()
 
