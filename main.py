@@ -89,8 +89,8 @@ MAIN_TEXT = (
     "Выбери способ оплаты 👇"
 )
 
-PRIVACY_TEXT = "📄 <b>Политика конфиденциальности</b>\n\nЗдесь должен быть твой текст политики..."
-TERMS_TEXT = "⚖️ <b>Пользовательское соглашение</b>\n\nЗдесь должен быть твой текст соглашения..."
+PRIVACY_TEXT = "📄 <b>Политика конфиденциальности</b>\n\nЗдесь должен быть твой текст..."
+TERMS_TEXT = "⚖️ <b>Пользовательское соглашение</b>\n\nЗдесь должен быть твой текст..."
 
 # ================== MENU ==================
 def menu():
@@ -123,7 +123,6 @@ async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=menu())
     await call.answer()
 
-# --- БЛОК ИНФОРМАЦИЯ (со всеми пунктами) ---
 @router.callback_query(F.data == "info")
 async def info_menu(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -134,17 +133,6 @@ async def info_menu(call: CallbackQuery):
     await call.message.edit_text("ℹ️ <b>Раздел информации:</b>", reply_markup=kb, parse_mode="HTML")
     await call.answer()
 
-@router.callback_query(F.data == "privacy")
-async def show_privacy(call: CallbackQuery):
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅ Назад", callback_data="info")]])
-    await call.message.edit_text(PRIVACY_TEXT, reply_markup=kb, parse_mode="HTML")
-
-@router.callback_query(F.data == "terms")
-async def show_terms(call: CallbackQuery):
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅ Назад", callback_data="info")]])
-    await call.message.edit_text(TERMS_TEXT, reply_markup=kb, parse_mode="HTML")
-
-# --- РЕФЕРАЛКА ---
 @router.callback_query(F.data == "ref")
 async def ref_system(call: CallbackQuery):
     bot_info = await bot.get_me()
@@ -157,15 +145,15 @@ async def ref_system(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
     await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
 
-# --- ОПЛАТА (STARS) ---
+# --- ОПЛАТА ---
 @router.callback_query(F.data == "stars")
 async def stars_menu(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="1 день — 550 ⭐", callback_data="stars_confirm:1")],
-        [InlineKeyboardButton(text="7 дней — 770 ⭐", callback_data="stars_confirm:7")],
-        [InlineKeyboardButton(text="30 дней — 1100 ⭐", callback_data="stars_confirm:30")],
+        [InlineKeyboardButton(text=f"{v['name']} — {v['stars']} ⭐", callback_data=f"stars_confirm:{k}") for k, v in PLANS.items()],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
+    # Пересобираем кнопки в столбик для красоты
+    kb.inline_keyboard = [[btn] for btn in kb.inline_keyboard[0]] + [kb.inline_keyboard[1]]
     await call.message.edit_text("⭐ Выберите тариф Stars:", reply_markup=kb)
 
 @router.callback_query(F.data.startswith("stars_confirm:"))
@@ -182,15 +170,13 @@ async def stars_confirm(call: CallbackQuery):
     ])
     await call.message.edit_text(f"💰 К оплате: {plan['stars']} ⭐\nНажми кнопку ниже:", reply_markup=kb)
 
-# --- ОПЛАТА (CRYPTO) ---
 @router.callback_query(F.data == "crypto")
 async def crypto_menu(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="1 день — 5$", callback_data="crypto_confirm:1")],
-        [InlineKeyboardButton(text="7 дней — 7$", callback_data="crypto_confirm:7")],
-        [InlineKeyboardButton(text="30 дней — 10$", callback_data="crypto_confirm:30")],
+        [InlineKeyboardButton(text=f"{v['name']} — {v['crypto']}$", callback_data=f"crypto_confirm:{k}") for k, v in PLANS.items()],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
+    kb.inline_keyboard = [[btn] for btn in kb.inline_keyboard[0]] + [kb.inline_keyboard[1]]
     await call.message.edit_text("💰 Выберите тариф Crypto:", reply_markup=kb)
 
 @router.callback_query(F.data.startswith("crypto_confirm:"))
@@ -213,7 +199,7 @@ async def crypto_confirm(call: CallbackQuery):
         ])
         await call.message.edit_text(f"💰 К оплате: {plan['crypto']} $\nНажми кнопку ниже:", reply_markup=kb)
 
-# --- ПРОВЕРКА И ПРИЕМ В КАНАЛ ---
+# --- ПРИЕМ В КАНАЛ ---
 @router.pre_checkout_query()
 async def pre_checkout(pre: PreCheckoutQuery):
     await pre.answer(ok=True)
@@ -232,28 +218,71 @@ async def approve_request(request: ChatJoinRequest):
     else:
         await bot.send_message(request.from_user.id, "❌ Сначала оплатите подписку в боте.")
 
+# ================== BACKGROUND TASKS ==================
+
 async def check_crypto():
+    """Фоновая проверка оплаты через Crypto Pay"""
     while True:
         await asyncio.sleep(20)
-        async with aiohttp.ClientSession() as session:
-            async with session.get("https://pay.crypt.bot/api/getInvoices", headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN}) as resp:
-                data = await resp.json()
-        if data.get("ok"):
-            async with aiosqlite.connect(DB_NAME) as db:
-                for inv in data["result"]["items"]:
-                    if inv["status"] == "paid":
-                        async with db.execute("SELECT user_id, plan_id FROM crypto_invoices WHERE invoice_id=?", (str(inv["invoice_id"]),)) as cur:
-                            row = await cur.fetchone()
-                            if row:
-                                await extend_user(row[0], PLANS[row[1]]["days"])
-                                await bot.send_message(row[0], "✅ Оплата принята! Можешь вступать в канал.")
-                                await db.execute("DELETE FROM crypto_invoices WHERE invoice_id=?", (str(inv["invoice_id"]),))
-                                await db.commit()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get("https://pay.crypt.bot/api/getInvoices", 
+                                     headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN}) as resp:
+                    data = await resp.json()
+            
+            if data.get("ok"):
+                async with aiosqlite.connect(DB_NAME) as db:
+                    for inv in data["result"]["items"]:
+                        if inv["status"] == "paid":
+                            async with db.execute("SELECT user_id, plan_id FROM crypto_invoices WHERE invoice_id=?", (str(inv["invoice_id"]),)) as cur:
+                                row = await cur.fetchone()
+                                if row:
+                                    await extend_user(row[0], PLANS[row[1]]["days"])
+                                    await bot.send_message(row[0], "✅ Оплата принята! Можешь вступать в канал.")
+                                    await db.execute("DELETE FROM crypto_invoices WHERE invoice_id=?", (str(inv["invoice_id"]),))
+                                    await db.commit()
+        except Exception as e:
+            logging.error(f"Ошибка в check_crypto: {e}")
 
+async def check_expirations():
+    """Фоновый кик пользователей с истекшей подпиской"""
+    while True:
+        await asyncio.sleep(3600) # Проверка раз в час
+        logging.info("Запуск проверки истекших подписок...")
+        try:
+            async with aiosqlite.connect(DB_NAME) as db:
+                now = datetime.utcnow().isoformat()
+                # Берем только тех, у кого есть expiry и она меньше NOW
+                async with db.execute("SELECT user_id FROM users WHERE expiry IS NOT NULL AND expiry < ?", (now,)) as cursor:
+                    expired_users = await cursor.fetchall()
+                    
+                    for user in expired_users:
+                        uid = user[0]
+                        try:
+                            # Кикаем и сразу разбаниваем (чтобы могли вернуться после оплаты)
+                            await bot.ban_chat_member(CHANNEL_ID, uid)
+                            await bot.unban_chat_member(CHANNEL_ID, uid)
+                            
+                            # Сбрасываем срок в БД, чтобы не кикать по кругу
+                            await db.execute("UPDATE users SET expiry = NULL WHERE user_id = ?", (uid,))
+                            await bot.send_message(uid, "❌ Твоя подписка истекла. Доступ к каналу закрыт, но ты можешь продлить её в меню!")
+                        except Exception as kick_err:
+                            logging.error(f"Не удалось кикнуть {uid}: {kick_err}")
+                await db.commit()
+        except Exception as e:
+            logging.error(f"Ошибка в check_expirations: {e}")
+
+# ================== MAIN ==================
 async def main():
     await init_db()
+    # Запускаем фоновые задачи
     asyncio.create_task(check_crypto())
+    asyncio.create_task(check_expirations())
+    
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logging.info("Бот остановлен")
