@@ -98,16 +98,15 @@ async def crypto(call: CallbackQuery):
 async def stars_select(call: CallbackQuery):
     plan = call.data.split(":")[1]
 
-    await bot.send_invoice(
-        chat_id=call.message.chat.id,
-        title="Подписка",
-        description=f"{plan} дней доступа",
-        payload=f"stars_{plan}",
-        provider_token="",
-        currency="XTR",
-        prices=[LabeledPrice(label="Access", amount=PLANS[plan]["stars"])]
-    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 Оплатить", callback_data=f"stars_pay:{plan}")],
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
+    ])
 
+    await call.message.edit_text(
+        f"⭐ Вы выбрали {plan} дней подписки\n\nНажмите оплатить для продолжения.",
+        reply_markup=kb
+    )
     await call.answer()
 
 # ================== PRECHECKOUT ==================
@@ -181,6 +180,22 @@ async def crypto_select(call: CallbackQuery):
         f"💰 Вы выбрали {plan} дней подписки\n\nНажмите оплатить.",
         reply_markup=kb
     )
+    await call.answer()
+
+@router.callback_query(F.data.startswith("stars_pay:"))
+async def stars_pay(call: CallbackQuery):
+    plan = call.data.split(":")[1]
+
+    await bot.send_invoice(
+        chat_id=call.message.chat.id,
+        title="Подписка",
+        description=f"{plan} дней доступа",
+        payload=f"stars_{plan}",
+        provider_token="",
+        currency="XTR",
+        prices=[LabeledPrice(label="Access", amount=PLANS[plan]["stars"])]
+    )
+
     await call.answer()
 
 # ================== REF ==================
