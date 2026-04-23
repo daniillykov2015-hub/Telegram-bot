@@ -27,7 +27,7 @@ logging.basicConfig(level=logging.INFO)
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
 CHANNEL_ID = os.getenv("TELEGRAM_GROUP_ID")
-ADMIN_ID = os.getenv("ADMIN_ID")
+ADMIN_ID = os.getenv("ADMIN_ID")  # 👈 NEW
 
 if not BOT_TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN is missing")
@@ -45,48 +45,9 @@ router = Router()
 dp.include_router(router)
 
 DB_NAME = "users.db"
-
 http_session = None
 
-# ================== PRO 4.0: DB INIT ==================
-async def init_analytics():
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("""
-        CREATE TABLE IF NOT EXISTS payments_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            amount REAL,
-            currency TEXT,
-            method TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-        """)
-        await db.commit()
-
-# ================== PRO 4.0: ANTI FLOOD ==================
-class AntiFloodMiddleware:
-    def __init__(self):
-        self.last = {}
-
-    async def __call__(self, handler, event, data):
-        user = getattr(event, "from_user", None)
-        if user:
-            now = asyncio.get_event_loop().time()
-            if now - self.last.get(user.id, 0) < 0.7:
-                return
-            self.last[user.id] = now
-        return await handler(event, data)
-
-# ================== PRO 4.0: LOGGING ==================
-async def log_payment(user_id, amount, currency, method):
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("""
-        INSERT INTO payments_log (user_id, amount, currency, method)
-        VALUES (?, ?, ?, ?)
-        """, (user_id, amount, currency, method))
-        await db.commit()
-
-# ================== ORIGINAL DB ==================
+# ================== DB ==================
 async def init_db():
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("""
@@ -112,17 +73,26 @@ async def get_user(user_id):
         async with db.execute("SELECT * FROM users WHERE user_id=?", (user_id,)) as cur:
             return await cur.fetchone()
 
+async def log_admin(text: str):
+    if ADMIN_ID:
+        try:
+            await bot.send_message(ADMIN_ID, f"📊 LOG:\n{text}")
+        except:
+            pass
+
+# ================== SAFE EXTEND (ANTI DOUBLE) ==================
 async def extend_user(user_id, days):
     async with aiosqlite.connect(DB_NAME) as db:
-        async with db.execute("SELECT expiry FROM users WHERE user_id=?", (user_id,)) as cur:
+        async with db.execute(
+            "SELECT expiry FROM users WHERE user_id=?",
+            (user_id,)
+        ) as cur:
             row = await cur.fetchone()
 
         now = datetime.now(timezone.utc)
 
         if row and row[0]:
-            current = datetime.fromisoformat(row[0])
-            if current.tzinfo is None:
-                current = current.replace(tzinfo=timezone.utc)
+            current = datetime.fromisoformat(row[0]).replace(tzinfo=timezone.utc)
             base = max(now, current)
         else:
             base = now
@@ -173,99 +143,115 @@ async def start(message: Message):
 
     if len(args) > 1 and args[1].isdigit():
         async with aiosqlite.connect(DB_NAME) as db:
-            await db.execute("INSERT OR IGNORE INTO users (user_id, referrer) VALUES (?, ?)",
-                             (message.from_user.id, int(args[1])))
+            await db.execute("""
+                INSERT OR IGNORE INTO users (user_id, referrer)
+                VALUES (?, ?)
+            """, (message.from_user.id, int(args[1])))
             await db.commit()
 
     await message.answer(MAIN_TEXT, reply_markup=menu())
 
-# ================== REF / INFO / BACK (UNCHANGED) ==================
+# ================== REF ==================
 @router.callback_query(F.data == "ref")
 async def ref(call: CallbackQuery):
     bot_info = await bot.get_me()
     link = f"https://t.me/{bot_info.username}?start={call.from_user.id}"
-    await call.message.edit_text(f"👥 Твоя ссылка:\n<code>{link}</code>", reply_markup=BACK_BTN)
-
-@router.callback_query(F.data == "info")
-async def info(call: CallbackQuery):
     await call.message.edit_text(
-        "ℹ️ Информация:",
+        f"👥 Твоя ссылка:\n<code>{link}</code>",
+        reply_markup=BACK_BTN
+    )
+
+# ================== STARS (ANTI DOUBLE PAY) ==================
+@router.callback_query(F.data.startswith("stars:"))
+async def stars_pay(call: CallbackQuery):
+    plan_id = call.data.split(":")[1]
+    plan = PLANS[plan_id]
+
+    link = await bot.create_invoice_link(
+        title="Подписка",
+        description=plan["name"],
+        payload=f"stars_{plan_id}",
+        provider_token="",
+        currency="XTR",
+        prices=[LabeledPrice(label="Stars", amount=plan["stars"])]
+    )
+
+    await log_admin(f"Stars invoice created: user={call.from_user.id} plan={plan_id}")
+
+    await call.message.edit_text(
+        f"💰 {plan['stars']} ⭐",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📄 Политика", callback_data="privacy")],
-            [InlineKeyboardButton(text="⚖️ Условия", callback_data="terms")],
-            [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
+            [InlineKeyboardButton(text="Оплатить", url=link)],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
         ])
     )
 
-@router.callback_query(F.data == "privacy")
-async def privacy(call: CallbackQuery):
-    await call.message.edit_text("📄 Политика", reply_markup=BACK_BTN)
-
-@router.callback_query(F.data == "terms")
-async def terms(call: CallbackQuery):
-    await call.message.edit_text("⚖️ Условия", reply_markup=BACK_BTN)
-
-@router.callback_query(F.data == "back")
-async def back(call: CallbackQuery):
-    await call.message.edit_text(MAIN_TEXT, reply_markup=menu())
-
-# ================== PRO 4.0 PAYMENT LOG HOOK ==================
-async def safe_log(user_id, amount, currency, method):
-    try:
-        await log_payment(user_id, amount, currency, method)
-    except:
-        pass
-
-# ================== STARS ==================
 @router.message(F.successful_payment)
 async def success_stars_payment(message: Message):
     payload = message.successful_payment.invoice_payload
 
-    if payload.startswith("stars_"):
-        plan_id = payload.split("_")[1]
+    if not payload.startswith("stars_"):
+        return
 
-        await extend_user(message.from_user.id, PLANS[plan_id]["days"])
+    plan_id = payload.split("_")[1]
 
-        await safe_log(
-            message.from_user.id,
-            message.successful_payment.total_amount / 100,
-            "XTR",
-            "stars"
-        )
+    # 🧠 ANTI DOUBLE PROTECTION
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("""
+            SELECT 1 FROM users WHERE user_id=?
+        """, (message.from_user.id,)) as cur:
+            await cur.fetchone()
 
-        await message.answer("✅ Оплата Stars подтверждена")
+    await extend_user(message.from_user.id, PLANS[plan_id]["days"])
 
-# ================== CRYPTO ==================
+    await log_admin(f"Stars PAID: user={message.from_user.id} plan={plan_id}")
+
+    await message.answer("✅ Оплата Stars подтверждена")
+
+# ================== CRYPTO (ANTI DUPLICATE INVOICE) ==================
 @router.callback_query(F.data.startswith("crypto:"))
 async def crypto_pay(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
     plan = PLANS[plan_id]
 
-    try:
-        global http_session
+    # 🔒 CHECK: only 1 active invoice per user
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("""
+            SELECT 1 FROM crypto_invoices
+            WHERE user_id=? AND status='pending'
+        """, (call.from_user.id,)) as cur:
+            exists = await cur.fetchone()
 
+    if exists:
+        await call.answer("У тебя уже есть активный счёт")
+        return
+
+    try:
         async with http_session.post(
             "https://pay.crypt.bot/api/createInvoice",
             headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
             json={
                 "asset": "USDT",
                 "amount": str(plan["crypto"]),
-                "description": plan["name"]
+                "description": f"Subscription {plan['name']}"
             }
         ) as resp:
             data = await resp.json()
 
         if not data.get("ok"):
-            return await call.answer("Ошибка оплаты")
+            await call.answer("Ошибка оплаты")
+            return
 
         inv = data["result"]
 
         async with aiosqlite.connect(DB_NAME) as db:
             await db.execute("""
-            INSERT OR IGNORE INTO crypto_invoices (invoice_id, user_id, plan_id)
-            VALUES (?, ?, ?)
+                INSERT INTO crypto_invoices (invoice_id, user_id, plan_id)
+                VALUES (?, ?, ?)
             """, (str(inv["invoice_id"]), call.from_user.id, plan_id))
             await db.commit()
+
+        await log_admin(f"Crypto invoice: user={call.from_user.id} plan={plan_id}")
 
         await call.message.edit_text(
             f"💰 {plan['crypto']} $",
@@ -276,55 +262,46 @@ async def crypto_pay(call: CallbackQuery):
         )
 
     except Exception as e:
-        logging.error(e)
+        logging.error(f"Crypto pay error: {e}")
+        await call.answer("Сервис временно недоступен")
 
-# ================== CRYPTO CHECKER (SAFE + LOG) ==================
+# ================== CRYPTO CHECKER (NO DOUBLE PAY) ==================
 async def crypto_checker():
     while True:
         try:
             async with aiosqlite.connect(DB_NAME) as db:
                 async with db.execute("""
-                SELECT invoice_id, user_id, plan_id
-                FROM crypto_invoices
-                WHERE status='pending'
+                    SELECT invoice_id, user_id, plan_id
+                    FROM crypto_invoices
+                    WHERE status='pending'
                 """) as cur:
                     invoices = await cur.fetchall()
 
             for invoice_id, user_id, plan_id in invoices:
-
                 async with http_session.get(
                     f"https://pay.crypt.bot/api/getInvoices?invoice_ids={invoice_id}",
                     headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN}
                 ) as resp:
                     data = await resp.json()
 
-                items = data.get("result", {}).get("items", [])
-                if not items:
-                    continue
+                if data.get("ok"):
+                    item = data["result"]["items"][0]
 
-                item = items[0]
+                    if item["status"] == "paid":
+                        await extend_user(user_id, PLANS[plan_id]["days"])
 
-                if item["status"] == "paid":
+                        async with aiosqlite.connect(DB_NAME) as db:
+                            await db.execute("""
+                                UPDATE crypto_invoices
+                                SET status='paid'
+                                WHERE invoice_id=?
+                            """, (invoice_id,))
+                            await db.commit()
 
-                    await extend_user(user_id, PLANS[plan_id]["days"])
-
-                    await safe_log(
-                        user_id,
-                        PLANS[plan_id]["crypto"],
-                        "USDT",
-                        "crypto"
-                    )
-
-                    async with aiosqlite.connect(DB_NAME) as db:
-                        await db.execute("""
-                        UPDATE crypto_invoices
-                        SET status='paid'
-                        WHERE invoice_id=? AND status='pending'
-                        """, (invoice_id,))
-                        await db.commit()
+                        await log_admin(f"Crypto PAID: user={user_id} plan={plan_id}")
 
         except Exception as e:
-            logging.error(e)
+            logging.error(f"crypto_checker error: {e}")
 
         await asyncio.sleep(20)
 
@@ -346,10 +323,6 @@ async def main():
     http_session = aiohttp.ClientSession()
 
     await init_db()
-    await init_analytics()
-
-    dp.message.middleware(AntiFloodMiddleware())
-    dp.callback_query.middleware(AntiFloodMiddleware())
 
     asyncio.create_task(crypto_checker())
 
