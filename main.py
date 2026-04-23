@@ -23,7 +23,7 @@ logging.basicConfig(level=logging.INFO)
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
-CHANNEL_ID = -100XXXXXXXXX  # ← ВСТАВЬ СЮДА ID КАНАЛА
+CHANNEL_ID = int(os.getenv("TELEGRAM_GROUP_ID"))
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
