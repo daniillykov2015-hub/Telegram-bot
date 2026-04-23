@@ -85,6 +85,7 @@ async def stars_select(call: CallbackQuery):
     )
     await call.answer()
 
+
 @router.callback_query(F.data.startswith("stars_pay:"))
 async def stars_pay(call: CallbackQuery):
     plan = call.data.split(":")[1]
@@ -101,7 +102,7 @@ async def stars_pay(call: CallbackQuery):
 
     await call.answer()
 
-# ================== CRYPTO MENU ==================
+
 @router.callback_query(F.data.startswith("crypto:"))
 async def crypto_select(call: CallbackQuery):
     plan = call.data.split(":")[1]
@@ -116,6 +117,8 @@ async def crypto_select(call: CallbackQuery):
         reply_markup=kb
     )
     await call.answer()
+
+
 @router.callback_query(F.data.startswith("crypto_pay:"))
 async def crypto_pay(call: CallbackQuery):
     plan = call.data.split(":")[1]
@@ -133,16 +136,13 @@ async def crypto_pay(call: CallbackQuery):
 
     if not r.get("ok"):
         await call.message.answer("❌ Ошибка создания инвойса")
-        await call.answer()
         return
 
-    invoice = r["result"]
-
-    await call.message.answer(
-        f"💰 Оплата:\n\n{invoice['pay_url']}"
-    )
-
+    await call.message.answer(f"💰 Оплата:\n{r['result']['pay_url']}")
     await call.answer()
+
+# ================== CRYPTO MENU ==================
+
 
 # ================== STARS PAY ==================
 @router.callback_query(F.data.startswith("stars:"))
