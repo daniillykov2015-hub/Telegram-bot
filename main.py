@@ -281,7 +281,44 @@ async def start(message: Message):
 async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=main_menu_kb())
     await call.answer()
+# --- PLATEGA (CARD/SBP) ---
+@router.callback_query(F.data == "platega")
+async def platega_menu(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"{p['name']} — {p['rub']} ₽", callback_data=f"plat_confirm:{k}")]
+        for k, p in PLANS.items()
+    ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
+    await call.message.edit_text("💳 Выберите тариф (Карта/СБП):", reply_markup=kb)
+    await call.answer()
 
+@router.callback_query(F.data.startswith("plat_confirm:"))
+async def plat_confirm(call: CallbackQuery):
+    plan_id = call.data.split(":")[1]
+    plan = PLANS[plan_id]
+    order_id = f"plat_{call.from_user.id}_{int(datetime.now().timestamp())}"
+    
+    try:
+        pay_url = await create_platega_invoice(plan['rub'], order_id, f"Подписка {plan['name']}")
+        if not pay_url:
+            await call.answer("❌ Ошибка сервиса оплаты", show_alert=True)
+            return
+
+        text = (
+            "<b>Проверьте детали платежа:</b>\n\n"
+            f"📦 Тариф: {plan['name']}\n"
+            "💳 Способ оплаты: Карта / СБП (Platega)\n"
+            f"💰 К оплате: {plan['rub']} ₽\n\n"
+            "Нажмите кнопку ниже для перехода к оплате."
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💸 Оплатить", url=pay_url)],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="platega")]
+        ])
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception as e:
+        logging.error(f"Platega error: {e}")
+        await call.answer("❌ Произошла ошибка", show_alert=True)
+    await call.answer()
 # --- STARS ---
 @router.callback_query(F.data == "stars")
 async def stars_menu(call: CallbackQuery):
