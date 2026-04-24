@@ -303,7 +303,7 @@ async def plat_confirm(call: CallbackQuery):
             f"💰 К оплате: {plan['rub']} ₽\n\n"
             "Нажмите кнопку ниже для перехода к оплате."
         )
-        text = (
+    text = (
             "<b>Проверьте детали платежа:</b>\n\n"
             f"📦 Тариф: {plan['name']}\n"
             "💳 Способ оплаты: Карта / СБП (Platega)\n"
