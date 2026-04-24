@@ -249,9 +249,9 @@ async def create_platega_invoice(amount, order_id, description):
         result = await resp.json()
         return result.get("paymentUrl") # Или другой ключ из ответа API
 # ================== KEYBOARDS ==================
-def main_menu_kb():
-    return InlineKeyboardMarkup(inline_keyboard=[
+return InlineKeyboardMarkup(inline_keyboard=[
         [
+            InlineKeyboardButton(text="💳 Карта / СБП", callback_data="platega"),
             InlineKeyboardButton(text="⭐ Stars", callback_data="stars"),
             InlineKeyboardButton(text="💰 Crypto", callback_data="crypto"),
         ],
