@@ -168,36 +168,9 @@ PLANS = {
 # ================== DB LOGIC ==================
 async def init_db():
     async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            expiry TEXT,
-            referrer INTEGER,
-            ref_count INTEGER DEFAULT 0,
-            bonus_days INTEGER DEFAULT 0
-        )""")
-        await db.execute("""
-        CREATE TABLE IF NOT EXISTS crypto_invoices (
-            invoice_id TEXT PRIMARY KEY,
-            user_id INTEGER,
-            plan_id TEXT,
-            status TEXT DEFAULT 'pending'
-        )""")
-await db.execute("""
-        CREATE TABLE IF NOT EXISTS crypto_invoices (
-            invoice_id TEXT PRIMARY KEY,
-            user_id INTEGER,
-            plan_id TEXT,
-            status TEXT DEFAULT 'pending'
-        )""")
-        
-        await db.execute("""
-        CREATE TABLE IF NOT EXISTS platega_invoices (
-            invoice_id TEXT PRIMARY KEY,
-            user_id INTEGER,
-            plan_id TEXT,
-            status TEXT DEFAULT 'pending'
-        )""")
+        await db.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, expiry TEXT, referrer INTEGER, ref_count INTEGER DEFAULT 0, bonus_days INTEGER DEFAULT 0)")
+        await db.execute("CREATE TABLE IF NOT EXISTS crypto_invoices (invoice_id TEXT PRIMARY KEY, user_id INTEGER, plan_id TEXT, status TEXT DEFAULT 'pending')")
+        await db.execute("CREATE TABLE IF NOT EXISTS platega_invoices (invoice_id TEXT PRIMARY KEY, user_id INTEGER, plan_id TEXT, status TEXT DEFAULT 'pending')")
         await db.commit()
 
 async def get_user(user_id):
@@ -217,10 +190,7 @@ async def extend_user(user_id, days, is_bonus=False):
             base = datetime.now(timezone.utc)
 
         new_expiry = base + timedelta(days=days)
-        await db.execute("""
-        INSERT INTO users (user_id, expiry) VALUES (?, ?)
-        ON CONFLICT(user_id) DO UPDATE SET expiry=excluded.expiry
-        """, (user_id, new_expiry.isoformat()))
+        await db.execute("INSERT INTO users (user_id, expiry) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET expiry=excluded.expiry", (user_id, new_expiry.isoformat()))
         await db.commit()
         
         # Если это обычная покупка (не бонус) и у пользователя есть пригласитель
