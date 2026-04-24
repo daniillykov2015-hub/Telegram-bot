@@ -314,10 +314,10 @@ async def plat_confirm(call: CallbackQuery):
             [InlineKeyboardButton(text="💸 Оплатить", url=pay_url)],
             [InlineKeyboardButton(text="⬅ Назад", callback_data="platega")]
         ])
-        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     except Exception as e:
         logging.error(f"Platega error: {e}")
-        await call.answer("❌ Произошла ошибка", show_alert=True)
+    await call.answer("❌ Произошла ошибка", show_alert=True)
     await call.answer()
 # --- STARS ---
 @router.callback_query(F.data == "stars")
