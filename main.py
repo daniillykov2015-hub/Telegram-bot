@@ -310,7 +310,7 @@ async def plat_confirm(call: CallbackQuery):
             f"💰 К оплате: {plan['rub']} ₽\n\n"
             "Нажмите кнопку ниже для перехода к оплате."
         )
-        kb = InlineKeyboardMarkup(inline_keyboard=[
+    kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="💸 Оплатить", url=pay_url)],
             [InlineKeyboardButton(text="⬅ Назад", callback_data="platega")]
         ])
