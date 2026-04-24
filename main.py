@@ -289,7 +289,7 @@ async def plat_confirm(call: CallbackQuery):
             await call.answer("❌ Ошибка сервиса оплаты", show_alert=True)
             return
 
-        # Сохраняем в базу данных
+        # Запись в базу данных
         async with aiosqlite.connect(DB_NAME) as db:
             await db.execute("INSERT INTO platega_invoices (invoice_id, user_id, plan_id) VALUES (?, ?, ?)", (order_id, call.from_user.id, plan_id))
             await db.commit()
@@ -310,14 +310,6 @@ async def plat_confirm(call: CallbackQuery):
         logging.error(f"Platega error: {e}")
         await call.answer("❌ Произошла ошибка", show_alert=True)
     await call.answer()
-
-        # --- ВОТ ЭТОТ БЛОК НУЖНО ДОБАВИТЬ ---
-        async with aiosqlite.connect(DB_NAME) as db:
-            await db.execute(
-                "INSERT INTO platega_invoices (invoice_id, user_id, plan_id) VALUES (?, ?, ?)",
-                (order_id, call.from_user.id, plan_id)
-            )
-            await db.commit()
         # ------------------------------------
 
         text = (
