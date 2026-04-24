@@ -185,6 +185,22 @@ async def init_db():
         )""")
         await db.commit()
 
+await db.execute("""
+        CREATE TABLE IF NOT EXISTS crypto_invoices (
+            invoice_id TEXT PRIMARY KEY,
+            user_id INTEGER,
+            plan_id TEXT,
+            status TEXT DEFAULT 'pending'
+        )""")
+        # --- СЮДА ВСТАВЛЯЕМ НОВУЮ ТАБЛИЦУ ---
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS platega_invoices (
+            invoice_id TEXT PRIMARY KEY,
+            user_id INTEGER,
+            plan_id TEXT,
+            status TEXT DEFAULT 'pending'
+        )""")
+        await db.commit() # Строка 186
 async def get_user(user_id):
     async with aiosqlite.connect(DB_NAME) as db:
         async with db.execute("SELECT user_id, expiry, referrer, ref_count, bonus_days FROM users WHERE user_id=?", (user_id,)) as cur:
@@ -302,7 +318,28 @@ async def plat_confirm(call: CallbackQuery):
         if not pay_url:
             await call.answer("❌ Ошибка сервиса оплаты", show_alert=True)
             return
+try:
+        pay_url = await create_platega_invoice(plan['rub'], order_id, f"Подписка {plan['name']}")
+        if not pay_url:
+            await call.answer("❌ Ошибка сервиса оплаты", show_alert=True)
+            return
 
+        # --- ВОТ ЭТОТ БЛОК НУЖНО ДОБАВИТЬ ---
+        async with aiosqlite.connect(DB_NAME) as db:
+            await db.execute(
+                "INSERT INTO platega_invoices (invoice_id, user_id, plan_id) VALUES (?, ?, ?)",
+                (order_id, call.from_user.id, plan_id)
+            )
+            await db.commit()
+        # ------------------------------------
+
+        text = (
+            "<b>Проверьте детали платежа:</b>\n\n"
+            f"📦 Тариф: {plan['name']}\n"
+            "💳 Способ оплаты: Карта / СБП (Platega)\n"
+            f"💰 К оплате: {plan['rub']} ₽\n\n"
+            "Нажмите кнопку ниже для перехода к оплате."
+        )
         text = (
             "<b>Проверьте детали платежа:</b>\n\n"
             f"📦 Тариф: {plan['name']}\n"
@@ -521,13 +558,40 @@ async def check_subscriptions():
         except Exception as e:
             logging.error(f"Subscription checker error: {e}")
         await asyncio.sleep(3600)
-
+async def platega_checker():
+    while True:
+        try:
+            async with aiosqlite.connect(DB_NAME) as db:
+                async with db.execute("SELECT invoice_id, user_id, plan_id FROM platega_invoices WHERE status='pending'") as cur:
+                    invoices = await cur.fetchall()
+            
+            for inv_id, u_id, p_id in invoices:
+                # Запрос к API Platega для проверки статуса
+                url = f"https://api.platega.com/v1/payment/status/{inv_id}"
+                headers = {"Authorization": f"Bearer {PLATEGA_API_KEY}"}
+                
+                async with http_session.get(url, headers=headers) as resp:
+                    data = await resp.json()
+                
+                if data.get("status") == "completed": # Уточните статус в доках Platega (обычно completed или success)
+                    await extend_user(u_id, PLANS[p_id]["days"])
+                    async with aiosqlite.connect(DB_NAME) as db:
+                        await db.execute("UPDATE platega_invoices SET status='paid' WHERE invoice_id=?", (inv_id,))
+                        await db.commit()
+                    try:
+                        await bot.send_message(u_id, "✅ Ваша оплата через СБП/Карту принята! Доступ активирован.")
+                    except:
+                        pass
+        except Exception as e:
+            logging.error(f"Platega checker error: {e}")
+        await asyncio.sleep(30) # Проверка каждые 30 секунд
 async def main():
     global http_session
     http_session = aiohttp.ClientSession()
     await init_db()
     
     asyncio.create_task(crypto_checker())
+    asyncio.create_task(platega_checker()) 
     asyncio.create_task(check_subscriptions())
     
     await dp.start_polling(bot)
