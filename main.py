@@ -288,7 +288,7 @@ async def plat_confirm(call: CallbackQuery):
         if not pay_url:
             await call.answer("❌ Ошибка сервиса оплаты", show_alert=True)
             return
-try:
+    try:
         pay_url = await create_platega_invoice(plan['rub'], order_id, f"Подписка {plan['name']}")
         if not pay_url:
             await call.answer("❌ Ошибка сервиса оплаты", show_alert=True)
