@@ -282,23 +282,18 @@ async def plat_confirm(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
     plan = PLANS[plan_id]
     order_id = f"plat_{call.from_user.id}_{int(datetime.now().timestamp())}"
-    try:
-        pay_url = await create_platega_invoice(plan['rub'], order_id, f"Подписка {plan['name']}")
-        if not pay_url:
-            await call.answer("❌ Ошибка сервиса оплаты", show_alert=True)
-            return
-        async with aiosqlite.connect(DB_NAME) as db:
-            await db.execute("INSERT INTO platega_invoices (invoice_id, user_id, plan_id) VALUES (?, ?, ?)", (order_id, call.from_user.id, plan_id))
-            await db.commit()
-        text = f"<b>Детали платежа:</b>\n\n📦 Тариф: {plan['name']}\n💳 Способ: Карта / СБП\n💰 К оплате: {plan['rub']} ₽"
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💸 Оплатить", url=pay_url)],
-            [InlineKeyboardButton(text="⬅ Назад", callback_data="platega")]
-        ])
-        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
-    except Exception as e:
-        logging.error(f"Platega error: {e}")
-        await call.answer("❌ Ошибка", show_alert=True)
+    pay_url = await create_platega_invoice(plan['rub'], order_id, f"Подписка {plan['name']}")
+    if not pay_url:
+        await call.answer("❌ Ошибка сервиса", show_alert=True)
+        return
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("INSERT INTO platega_invoices (invoice_id, user_id, plan_id) VALUES (?, ?, ?)", (order_id, call.from_user.id, plan_id))
+        await db.commit()
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💸 Оплатить", url=pay_url)],
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="platega")]
+    ])
+    await call.message.edit_text(f"<b>Детали платежа:</b>\n\n📦 Тариф: {plan['name']}\n💰 К оплате: {plan['rub']} ₽", reply_markup=kb, parse_mode="HTML")
     await call.answer()
         # ------------------------------------
 
