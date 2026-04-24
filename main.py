@@ -183,8 +183,6 @@ async def init_db():
             plan_id TEXT,
             status TEXT DEFAULT 'pending'
         )""")
-        await db.commit()
-
 await db.execute("""
         CREATE TABLE IF NOT EXISTS crypto_invoices (
             invoice_id TEXT PRIMARY KEY,
@@ -192,15 +190,16 @@ await db.execute("""
             plan_id TEXT,
             status TEXT DEFAULT 'pending'
         )""")
-        # --- СЮДА ВСТАВЛЯЕМ НОВУЮ ТАБЛИЦУ ---
-await db.execute("""
+        
+        await db.execute("""
         CREATE TABLE IF NOT EXISTS platega_invoices (
             invoice_id TEXT PRIMARY KEY,
             user_id INTEGER,
             plan_id TEXT,
             status TEXT DEFAULT 'pending'
         )""")
-        await db.commit() # Строка 186
+        await db.commit()
+
 async def get_user(user_id):
     async with aiosqlite.connect(DB_NAME) as db:
         async with db.execute("SELECT user_id, expiry, referrer, ref_count, bonus_days FROM users WHERE user_id=?", (user_id,)) as cur:
@@ -222,6 +221,7 @@ async def extend_user(user_id, days, is_bonus=False):
         INSERT INTO users (user_id, expiry) VALUES (?, ?)
         ON CONFLICT(user_id) DO UPDATE SET expiry=excluded.expiry
         """, (user_id, new_expiry.isoformat()))
+        await db.commit()
         
         # Если это обычная покупка (не бонус) и у пользователя есть пригласитель
         if not is_bonus and row and row[1]:
