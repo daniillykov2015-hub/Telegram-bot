@@ -237,8 +237,12 @@ async def extend_user(user_id, days, is_bonus=False):
 def main_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
+            # Добавляем новую кнопку для Карт и СБП в самый верх
+            InlineKeyboardButton(text="💳 Карта / СБП (₽)", callback_data="pay_card"),
+        ],
+        [
             InlineKeyboardButton(text="⭐ Stars", callback_data="stars"),
-            InlineKeyboardButton(text="💰 Crypto", callback_data="crypto"),
+            InlineKeyboardButton(text="💰 Crypto ($)", callback_data="crypto"),
         ],
         [
             InlineKeyboardButton(text="👥 Реферальная система", callback_data="ref"),
@@ -246,7 +250,6 @@ def main_menu_kb():
         ],
         [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
     ])
-
 # ================== HANDLERS ==================
 @router.message(CommandStart())
 async def start(message: Message):
