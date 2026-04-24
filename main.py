@@ -27,8 +27,6 @@ logging.basicConfig(level=logging.INFO)
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
 CHANNEL_ID = os.getenv("TELEGRAM_GROUP_ID")
-PLATEGA_MERCHANT_ID = os.getenv("PLATEGA_MERCHANT_ID")
-PLATEGA_API_KEY = os.getenv("PLATEGA_API_KEY")
 
 if not BOT_TOKEN or not CRYPTO_TOKEN or not CHANNEL_ID:
     raise ValueError("Missing environment variables!")
@@ -221,7 +219,6 @@ def main_menu_kb():
         [
             InlineKeyboardButton(text="⭐ Stars", callback_data="stars"),
             InlineKeyboardButton(text="💰 Crypto", callback_data="crypto"),
-      InlineKeyboardButton(text="💳 Card / СБП", callback_data="card"),
         ],
         [
             InlineKeyboardButton(text="👥 Реферальная система", callback_data="ref"),
@@ -329,39 +326,7 @@ async def crypto_confirm(call: CallbackQuery):
     ])
     await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     await call.answer()
-@router.callback_query(F.data == "card")
-async def card_menu(call: CallbackQuery):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"{p['name']} — {p['crypto']}$", callback_data=f"card_confirm:{k}")]
-        for k, p in PLANS.items()
-    ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
-    
-    await call.message.edit_text("💳 Выберите тариф (карта / СБП):", reply_markup=kb)
-    await call.answer()
-    @router.callback_query(F.data.startswith("card_confirm:"))
-async def card_confirm(call: CallbackQuery):
-    plan_id = call.data.split(":")[1]
-    plan = PLANS[plan_id]
 
-    # ⚠️ ЗАГЛУШКА вместо реального API
-    fake_payment_url = "https://example.com/pay"
-
-    text = (
-        "<b>Проверьте детали платежа:</b>\n\n"
-        f"📦 Тариф: {plan['name']}\n"
-        f"🗓 Срок: {plan['name']}\n"
-        "💳 Способ оплаты: 💳 Карта / СБП\n"
-        f"💰 К оплате: {plan['crypto']} $\n\n"
-        "Нажмите 💸 Оплатить, чтобы перейти к оплате."
-    )
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💸 Оплатить", url=fake_payment_url)],
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="card")]
-    ])
-
-    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
-    await call.answer()
 # --- REFERRAL ---
 @router.callback_query(F.data == "ref")
 async def ref(call: CallbackQuery):
