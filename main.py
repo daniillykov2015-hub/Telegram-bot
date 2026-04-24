@@ -28,6 +28,10 @@ BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
 CHANNEL_ID = os.getenv("TELEGRAM_GROUP_ID")
 
+# Названия переменных точно как на твоем скриншоте
+PAYMENT_TOKEN = os.getenv("PLATEGA_API_KEY") 
+MERCHANT_ID = os.getenv("PLATEGA_MERCHANT_ID")
+
 if not BOT_TOKEN or not CRYPTO_TOKEN or not CHANNEL_ID:
     raise ValueError("Missing environment variables!")
 
@@ -40,7 +44,6 @@ router = Router()
 dp.include_router(router)
 
 http_session = None
-
 # ================== TEXTS ==================
 MAIN_TEXT = (
     "👋 Привет, я Ева и это мой закрытый канал\n\n"
