@@ -27,8 +27,7 @@ logging.basicConfig(level=logging.INFO)
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
 CHANNEL_ID = os.getenv("TELEGRAM_GROUP_ID")
-PLATEGA_MERCHANT_ID = os.getenv("PLATEGA_MERCHANT_ID")
-PLATEGA_API_KEY = os.getenv("PLATEGA_API_KEY")
+
 if not BOT_TOKEN or not CRYPTO_TOKEN or not CHANNEL_ID:
     raise ValueError("Missing environment variables!")
 
@@ -142,35 +141,29 @@ Platega
 
 # ================== PLANS ==================
 PLANS = {
-    "1": {
-        "name": "1 день", 
-        "days": 1, 
-        "rub": 690,    # Для Platega (СБП/Карты)
-        "stars": 790,  # Для Telegram Stars
-        "crypto": 9    # Для CryptoBot ($)
-    },
-    "7": {
-        "name": "7 дней", 
-        "days": 7, 
-        "rub": 1690, 
-        "stars": 1790, 
-        "crypto": 22
-    },
-    "30": {
-        "name": "30 дней", 
-        "days": 30, 
-        "rub": 3390, 
-        "stars": 3490, 
-        "crypto": 46
-    },
+    "1": {"stars": 550, "crypto": 5, "name": "1 день", "days": 1},
+    "7": {"stars": 770, "crypto": 7, "name": "7 дней", "days": 7},
+    "30": {"stars": 1100, "crypto": 10, "name": "30 дней", "days": 30},
 }
 
 # ================== DB LOGIC ==================
 async def init_db():
     async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, expiry TEXT, referrer INTEGER, ref_count INTEGER DEFAULT 0, bonus_days INTEGER DEFAULT 0)")
-        await db.execute("CREATE TABLE IF NOT EXISTS crypto_invoices (invoice_id TEXT PRIMARY KEY, user_id INTEGER, plan_id TEXT, status TEXT DEFAULT 'pending')")
-        await db.execute("CREATE TABLE IF NOT EXISTS platega_invoices (invoice_id TEXT PRIMARY KEY, user_id INTEGER, plan_id TEXT, status TEXT DEFAULT 'pending')")
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            expiry TEXT,
+            referrer INTEGER,
+            ref_count INTEGER DEFAULT 0,
+            bonus_days INTEGER DEFAULT 0
+        )""")
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS crypto_invoices (
+            invoice_id TEXT PRIMARY KEY,
+            user_id INTEGER,
+            plan_id TEXT,
+            status TEXT DEFAULT 'pending'
+        )""")
         await db.commit()
 
 async def get_user(user_id):
@@ -190,8 +183,10 @@ async def extend_user(user_id, days, is_bonus=False):
             base = datetime.now(timezone.utc)
 
         new_expiry = base + timedelta(days=days)
-        await db.execute("INSERT INTO users (user_id, expiry) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET expiry=excluded.expiry", (user_id, new_expiry.isoformat()))
-        await db.commit()
+        await db.execute("""
+        INSERT INTO users (user_id, expiry) VALUES (?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET expiry=excluded.expiry
+        """, (user_id, new_expiry.isoformat()))
         
         # Если это обычная покупка (не бонус) и у пользователя есть пригласитель
         if not is_bonus and row and row[1]:
@@ -217,27 +212,11 @@ async def extend_user(user_id, days, is_bonus=False):
                         except:
                             pass
         await db.commit()
-async def create_platega_invoice(amount, order_id, description):
-    url = "https://api.platega.com/v1/payment/create" # Уточните актуальный эндпоинт в доках Platega
-    headers = {
-        "Authorization": f"Bearer {PLATEGA_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    data = {
-        "merchantId": PLATEGA_MERCHANT_ID,
-        "amount": amount,
-        "orderId": order_id,
-        "description": description,
-        "currency": "RUB",
-        "paymentMethod": "sbp_card" 
-    }
-    async with http_session.post(url, json=data, headers=headers) as resp:
-        result = await resp.json()
-        return result.get("paymentUrl") # Или другой ключ из ответа API
+
 # ================== KEYBOARDS ==================
-return InlineKeyboardMarkup(inline_keyboard=[
+def main_menu_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="💳 Карта / СБП", callback_data="platega"),
             InlineKeyboardButton(text="⭐ Stars", callback_data="stars"),
             InlineKeyboardButton(text="💰 Crypto", callback_data="crypto"),
         ],
@@ -267,58 +246,7 @@ async def start(message: Message):
 async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=main_menu_kb())
     await call.answer()
-# --- PLATEGA (CARD/SBP) ---
-@router.callback_query(F.data == "platega")
-async def platega_menu(call: CallbackQuery):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"{p['name']} — {p['rub']} ₽", callback_data=f"plat_confirm:{k}")]
-        for k, p in PLANS.items()
-    ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
-    await call.message.edit_text("💳 Выберите тариф (Карта/СБП):", reply_markup=kb)
-    await call.answer()
 
-@router.callback_query(F.data.startswith("plat_confirm:"))
-async def plat_confirm(call: CallbackQuery):
-    plan_id = call.data.split(":")[1]
-    plan = PLANS[plan_id]
-    order_id = f"plat_{call.from_user.id}_{int(datetime.now().timestamp())}"
-    pay_url = await create_platega_invoice(plan['rub'], order_id, f"Подписка {plan['name']}")
-    if not pay_url:
-        await call.answer("❌ Ошибка сервиса", show_alert=True)
-        return
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("INSERT INTO platega_invoices (invoice_id, user_id, plan_id) VALUES (?, ?, ?)", (order_id, call.from_user.id, plan_id))
-        await db.commit()
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💸 Оплатить", url=pay_url)],
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="platega")]
-    ])
-    await call.message.edit_text(f"<b>Детали платежа:</b>\n\n📦 Тариф: {plan['name']}\n💰 К оплате: {plan['rub']} ₽", reply_markup=kb, parse_mode="HTML")
-    await call.answer()
-        # -------------------------------- 
-    text = (
-            "<b>Проверьте детали платежа:</b>\n\n"
-            f"📦 Тариф: {plan['name']}\n"
-            "💳 Способ оплаты: Карта / СБП (Platega)\n"
-            f"💰 К оплате: {plan['rub']} ₽\n\n"
-            "Нажмите кнопку ниже для перехода к оплате."
-        )
-    text = (
-            "<b>Проверьте детали платежа:</b>\n\n"
-            f"📦 Тариф: {plan['name']}\n"
-            "💳 Способ оплаты: Карта / СБП (Platega)\n"
-            f"💰 К оплате: {plan['rub']} ₽\n\n"
-            "Нажмите кнопку ниже для перехода к оплате."
-        )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💸 Оплатить", url=pay_url)],
-            [InlineKeyboardButton(text="⬅ Назад", callback_data="platega")]
-        ])
-    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
-    except Exception as e:
-        logging.error(f"Platega error: {e}")
-    await call.answer("❌ Произошла ошибка", show_alert=True)
-    await call.answer()
 # --- STARS ---
 @router.callback_query(F.data == "stars")
 async def stars_menu(call: CallbackQuery):
@@ -521,40 +449,13 @@ async def check_subscriptions():
         except Exception as e:
             logging.error(f"Subscription checker error: {e}")
         await asyncio.sleep(3600)
-async def platega_checker():
-    while True:
-        try:
-            async with aiosqlite.connect(DB_NAME) as db:
-                async with db.execute("SELECT invoice_id, user_id, plan_id FROM platega_invoices WHERE status='pending'") as cur:
-                    invoices = await cur.fetchall()
-            
-            for inv_id, u_id, p_id in invoices:
-                # Запрос к API Platega для проверки статуса
-                url = f"https://api.platega.com/v1/payment/status/{inv_id}"
-                headers = {"Authorization": f"Bearer {PLATEGA_API_KEY}"}
-                
-                async with http_session.get(url, headers=headers) as resp:
-                    data = await resp.json()
-                
-                if data.get("status") == "completed": # Уточните статус в доках Platega (обычно completed или success)
-                    await extend_user(u_id, PLANS[p_id]["days"])
-                    async with aiosqlite.connect(DB_NAME) as db:
-                        await db.execute("UPDATE platega_invoices SET status='paid' WHERE invoice_id=?", (inv_id,))
-                        await db.commit()
-                    try:
-                        await bot.send_message(u_id, "✅ Ваша оплата через СБП/Карту принята! Доступ активирован.")
-                    except:
-                        pass
-        except Exception as e:
-            logging.error(f"Platega checker error: {e}")
-        await asyncio.sleep(30) # Проверка каждые 30 секунд
+
 async def main():
     global http_session
     http_session = aiohttp.ClientSession()
     await init_db()
     
     asyncio.create_task(crypto_checker())
-    asyncio.create_task(platega_checker()) 
     asyncio.create_task(check_subscriptions())
     
     await dp.start_polling(bot)
