@@ -384,7 +384,7 @@ async def terms(call: CallbackQuery):
     await call.message.edit_text(TERMS_TEXT, reply_markup=kb)
     await call.answer()
 
-# --- PAYMENTS & JOIN ---
+# --- УНИВЕРСАЛЬНОЕ ПОДТВЕРЖДЕНИЕ ПЛАТЕЖЕЙ ---
 @router.pre_checkout_query()
 async def pre_checkout(pre: PreCheckoutQuery):
     await pre.answer(ok=True)
@@ -392,19 +392,14 @@ async def pre_checkout(pre: PreCheckoutQuery):
 @router.message(F.successful_payment)
 async def success(message: Message):
     payload = message.successful_payment.invoice_payload
-    if payload.startswith("stars_"):
+    # Бот понимает, какой платеж прошел (stars_ или card_)
+    if payload.startswith("stars_") or payload.startswith("card_"):
         plan_id = payload.split("_")[1]
-        await extend_user(message.from_user.id, PLANS[plan_id]["days"])
-        await message.answer("✅ Оплата прошла! Доступ активирован.")
-
-@router.chat_join_request()
-async def join(req: ChatJoinRequest):
-    user = await get_user(req.from_user.id)
-    if user and user[1]:
-        if datetime.fromisoformat(user[1]).replace(tzinfo=timezone.utc) > datetime.now(timezone.utc):
-            await req.approve()
-            return
-    await req.decline()
+        days = PLANS[plan_id]["days"]
+        
+        # Начисляем подписку
+        await extend_user(message.from_user.id, days)
+        await message.answer(f"✅ Оплата прошла успешно! Вам начислено <b>{days} дн.</b> доступа.")
 
 # --- BACKGROUND TASKS ---
 async def crypto_checker():
