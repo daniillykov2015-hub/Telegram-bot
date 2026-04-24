@@ -22,14 +22,14 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.exceptions import TelegramBadRequest
 
 # ================== CONFIG ==================
-logging.basicConfig(level=INFO)
+logging.basicConfig(level=logging.INFO)
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
 CHANNEL_ID = os.getenv("TELEGRAM_GROUP_ID")
-PAYMENT_PROVIDER_TOKEN = os.getenv("PAYMENT_PROVIDER_TOKEN")
-
-if not BOT_TOKEN or not CRYPTO_TOKEN or not CHANNEL_ID or not PAYMENT_PROVIDER_TOKEN:
+PLATEGA_MERCHANT_ID = os.getenv("PLATEGA_MERCHANT_ID")
+PLATEGA_API_KEY = os.getenv("PLATEGA_API_KEY")
+if not BOT_TOKEN or not CRYPTO_TOKEN or not CHANNEL_ID:
     raise ValueError("Missing environment variables!")
 
 CHANNEL_ID = int(CHANNEL_ID)
@@ -142,9 +142,27 @@ Platega
 
 # ================== PLANS ==================
 PLANS = {
-    "1": {"stars": 790, "crypto": 9, "rub": 69000, "name": "1 день", "days": 1},
-    "7": {"stars": 1790, "crypto": 22, "rub": 169000, "name": "7 дней", "days": 7},
-    "30": {"stars": 3490, "crypto": 46, "rub": 339000, "name": "30 дней", "days": 30},
+    "1": {
+        "name": "1 день", 
+        "days": 1, 
+        "rub": 690,    # Для Platega (СБП/Карты)
+        "stars": 790,  # Для Telegram Stars
+        "crypto": 9    # Для CryptoBot ($)
+    },
+    "7": {
+        "name": "7 дней", 
+        "days": 7, 
+        "rub": 1690, 
+        "stars": 1790, 
+        "crypto": 22
+    },
+    "30": {
+        "name": "30 дней", 
+        "days": 30, 
+        "rub": 3390, 
+        "stars": 3490, 
+        "crypto": 46
+    },
 }
 
 # ================== DB LOGIC ==================
@@ -189,13 +207,16 @@ async def extend_user(user_id, days, is_bonus=False):
         ON CONFLICT(user_id) DO UPDATE SET expiry=excluded.expiry
         """, (user_id, new_expiry.isoformat()))
         
+        # Если это обычная покупка (не бонус) и у пользователя есть пригласитель
         if not is_bonus and row and row[1]:
             ref_id = row[1]
+            # Проверяем, есть ли у пригласителя активная подписка (условие начисления бонуса)
             async with db.execute("SELECT expiry FROM users WHERE user_id=?", (ref_id,)) as cur:
                 ref_row = await cur.fetchone()
                 if ref_row and ref_row[0]:
                     ref_expiry = datetime.fromisoformat(ref_row[0]).replace(tzinfo=timezone.utc)
                     if ref_expiry > datetime.now(timezone.utc):
+                        # Начисляем 7 дней пригласителю
                         await db.execute("""
                             UPDATE users 
                             SET ref_count = ref_count + 1, 
@@ -203,6 +224,7 @@ async def extend_user(user_id, days, is_bonus=False):
                             WHERE user_id = ?
                         """, (ref_id,))
                         await db.commit()
+                        # Продлеваем срок пригласителю
                         await extend_user(ref_id, 7, is_bonus=True)
                         try:
                             await bot.send_message(ref_id, "💎 <b>Бонус начислен!</b> Ваш друг оплатил подписку, вам добавлено <b>7 дней</b> доступа!")
@@ -213,7 +235,6 @@ async def extend_user(user_id, days, is_bonus=False):
 # ================== KEYBOARDS ==================
 def main_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Карта / СБП", callback_data="card")],
         [
             InlineKeyboardButton(text="⭐ Stars", callback_data="stars"),
             InlineKeyboardButton(text="💰 Crypto", callback_data="crypto"),
@@ -234,6 +255,7 @@ async def start(message: Message):
         await db.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
         if len(args) > 1 and args[1].isdigit():
             referrer = int(args[1])
+            # Нельзя пригласить самого себя
             if referrer != user_id:
                 await db.execute("UPDATE users SET referrer = ? WHERE user_id = ? AND referrer IS NULL", (referrer, user_id))
         await db.commit()
@@ -242,31 +264,6 @@ async def start(message: Message):
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=main_menu_kb())
-    await call.answer()
-
-# --- CARD / SBP ---
-@router.callback_query(F.data == "card")
-async def card_menu(call: CallbackQuery):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"{p['name']} — {p['rub'] // 100} ₽", callback_data=f"card_confirm:{k}")]
-        for k, p in PLANS.items()
-    ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
-    await call.message.edit_text("💳 Выберите тариф (Карта / СБП):", reply_markup=kb)
-    await call.answer()
-
-@router.callback_query(F.data.startswith("card_confirm:"))
-async def card_confirm(call: CallbackQuery):
-    plan_id = call.data.split(":")[1]
-    plan = PLANS[plan_id]
-    await call.message.answer_invoice(
-        title="Оплата подписки",
-        description=f"Доступ в закрытый канал на {plan['name']}",
-        payload=f"card_{plan_id}",
-        provider_token=PAYMENT_PROVIDER_TOKEN,
-        currency="RUB",
-        prices=[LabeledPrice(label=f"Тариф {plan['name']}", amount=plan['rub'])],
-        start_parameter="sub_access"
-    )
     await call.answer()
 
 # --- STARS ---
@@ -317,19 +314,23 @@ async def crypto_menu(call: CallbackQuery):
 async def crypto_confirm(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
     plan = PLANS[plan_id]
+    
     async with http_session.post("https://pay.crypt.bot/api/createInvoice",
         headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
         json={"asset": "USDT", "amount": str(plan["crypto"]), "description": f"Subscription {plan['name']}"}
     ) as response:
         r = await response.json()
+
     if not r.get("ok"):
         await call.message.answer("❌ Ошибка CryptoPay")
         return
+
     pay_url = r["result"]["pay_url"]
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("INSERT OR IGNORE INTO crypto_invoices (invoice_id, user_id, plan_id) VALUES (?, ?, ?)",
                          (str(r["result"]["invoice_id"]), call.from_user.id, plan_id))
         await db.commit()
+
     text = (
         "<b>Проверьте детали платежа:</b>\n\n"
         f"📦 Тариф: {plan['name']}\n"
@@ -351,6 +352,7 @@ async def ref(call: CallbackQuery):
     user_data = await get_user(call.from_user.id)
     ref_count = user_data[3] if user_data else 0
     bonus_days = user_data[4] if user_data else 0
+    
     text = (
         "<b>👥 ПРИГЛАСИ ДРУГА — ПОЛУЧИ +7 ДНЕЙ!</b>\n\n"
         "Хочешь пользоваться закрытым каналом дольше и бесплатно? Участвуй в нашей реферальной программе!\n\n"
@@ -402,7 +404,7 @@ async def pre_checkout(pre: PreCheckoutQuery):
 @router.message(F.successful_payment)
 async def success(message: Message):
     payload = message.successful_payment.invoice_payload
-    if "_" in payload:
+    if payload.startswith("stars_"):
         plan_id = payload.split("_")[1]
         await extend_user(message.from_user.id, PLANS[plan_id]["days"])
         await message.answer("✅ Оплата прошла! Доступ активирован.")
@@ -423,10 +425,12 @@ async def crypto_checker():
             async with aiosqlite.connect(DB_NAME) as db:
                 async with db.execute("SELECT invoice_id, user_id, plan_id FROM crypto_invoices WHERE status='pending'") as cur:
                     invoices = await cur.fetchall()
+            
             for inv_id, u_id, p_id in invoices:
                 async with http_session.get(f"https://pay.crypt.bot/api/getInvoices?invoice_ids={inv_id}",
                     headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN}) as resp:
                     data = await resp.json()
+                
                 if data.get("ok") and data["result"]["items"][0]["status"] == "paid":
                     await extend_user(u_id, PLANS[p_id]["days"])
                     async with aiosqlite.connect(DB_NAME) as db:
@@ -446,6 +450,7 @@ async def check_subscriptions():
             async with aiosqlite.connect(DB_NAME) as db:
                 async with db.execute("SELECT user_id, expiry FROM users WHERE expiry IS NOT NULL") as cur:
                     users = await cur.fetchall()
+
             now = datetime.now(timezone.utc)
             for user_id, expiry_str in users:
                 expiry_dt = datetime.fromisoformat(expiry_str).replace(tzinfo=timezone.utc)
@@ -468,8 +473,10 @@ async def main():
     global http_session
     http_session = aiohttp.ClientSession()
     await init_db()
+    
     asyncio.create_task(crypto_checker())
     asyncio.create_task(check_subscriptions())
+    
     await dp.start_polling(bot)
     await http_session.close()
 
