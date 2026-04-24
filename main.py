@@ -270,7 +270,7 @@ async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=main_menu_kb())
     await call.answer()
 
-# --- STARS ---
+# --- STARS (ОБНОВЛЕННЫЙ) ---
 @router.callback_query(F.data == "stars")
 async def stars_menu(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -285,26 +285,19 @@ async def stars_confirm(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
     plan = PLANS[plan_id]
     invoice_link = await bot.create_invoice_link(
-        title="Подписка", description=f"Доступ в закрытый канал на {plan['name']}",
-        payload=f"stars_{plan_id}", provider_token="", currency="XTR", 
+        title="Подписка Stars", 
+        description=f"Доступ в закрытый канал на {plan['name']}",
+        payload=f"stars_{plan_id}", 
+        provider_token="", 
+        currency="XTR", 
         prices=[LabeledPrice(label="Оплата Stars", amount=plan['stars'])]
-    )
-    text = (
-        "<b>Проверьте детали платежа:</b>\n\n"
-        f"📦 Тариф: {plan['name']}\n"
-        f"🗓 Срок: {plan['name']}\n"
-        "💳 Способ оплаты: ⭐ Telegram Stars\n"
-        f"💰 К оплате: {plan['stars']} ⭐\n\n"
-        "Нажмите 💸 Оплатить, чтобы перейти к оплате."
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💸 Оплатить", url=invoice_link)],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
     ])
-    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
-    await call.answer()
-
-# --- CRYPTO ---
+    await call.message.edit_text(f"📦 <b>Тариф:</b> {plan['name']}\n💰 <b>К оплате:</b> {plan['stars']} ⭐", reply_markup=kb)
+    await call.answer()# --- CRYPTO (ОБНОВЛЕННЫЙ) ---
 @router.callback_query(F.data == "crypto")
 async def crypto_menu(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -318,7 +311,6 @@ async def crypto_menu(call: CallbackQuery):
 async def crypto_confirm(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
     plan = PLANS[plan_id]
-    
     async with http_session.post("https://pay.crypt.bot/api/createInvoice",
         headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
         json={"asset": "USDT", "amount": str(plan["crypto"]), "description": f"Subscription {plan['name']}"}
@@ -326,7 +318,7 @@ async def crypto_confirm(call: CallbackQuery):
         r = await response.json()
 
     if not r.get("ok"):
-        await call.message.answer("❌ Ошибка CryptoPay")
+        await call.message.answer("❌ Ошибка платежной системы. Попробуйте позже.")
         return
 
     pay_url = r["result"]["pay_url"]
@@ -335,19 +327,11 @@ async def crypto_confirm(call: CallbackQuery):
                          (str(r["result"]["invoice_id"]), call.from_user.id, plan_id))
         await db.commit()
 
-    text = (
-        "<b>Проверьте детали платежа:</b>\n\n"
-        f"📦 Тариф: {plan['name']}\n"
-        f"🗓 Срок: {plan['name']}\n"
-        "💳 Способ оплаты: 💰 CryptoBot (USDT)\n"
-        f"💰 К оплате: {plan['crypto']} $\n\n"
-        "Нажмите 💸 Оплатить, чтобы перейти к оплате."
-    )
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💸 Оплатить", url=pay_url)],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="crypto")]
     ])
-    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    await call.message.edit_text(f"📦 <b>Тариф:</b> {plan['name']}\n💰 <b>К оплате:</b> {plan['crypto']} $", reply_markup=kb)
     await call.answer()
 
 # --- REFERRAL ---
