@@ -231,7 +231,23 @@ async def extend_user(user_id, days, is_bonus=False):
                         except:
                             pass
         await db.commit()
-
+async def create_platega_invoice(amount, order_id, description):
+    url = "https://api.platega.com/v1/payment/create" # Уточните актуальный эндпоинт в доках Platega
+    headers = {
+        "Authorization": f"Bearer {PLATEGA_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "merchantId": PLATEGA_MERCHANT_ID,
+        "amount": amount,
+        "orderId": order_id,
+        "description": description,
+        "currency": "RUB",
+        "paymentMethod": "sbp_card" 
+    }
+    async with http_session.post(url, json=data, headers=headers) as resp:
+        result = await resp.json()
+        return result.get("paymentUrl") # Или другой ключ из ответа API
 # ================== KEYBOARDS ==================
 def main_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
