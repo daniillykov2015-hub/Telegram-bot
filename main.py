@@ -288,11 +288,28 @@ async def plat_confirm(call: CallbackQuery):
         if not pay_url:
             await call.answer("❌ Ошибка сервиса оплаты", show_alert=True)
             return
-    try:
-        pay_url = await create_platega_invoice(plan['rub'], order_id, f"Подписка {plan['name']}")
-        if not pay_url:
-            await call.answer("❌ Ошибка сервиса оплаты", show_alert=True)
-            return
+
+        # Сохраняем в базу данных
+        async with aiosqlite.connect(DB_NAME) as db:
+            await db.execute("INSERT INTO platega_invoices (invoice_id, user_id, plan_id) VALUES (?, ?, ?)", (order_id, call.from_user.id, plan_id))
+            await db.commit()
+
+        text = (
+            "<b>Проверьте детали платежа:</b>\n\n"
+            f"📦 Тариф: {plan['name']}\n"
+            "💳 Способ оплаты: Карта / СБП (Platega)\n"
+            f"💰 К оплате: {plan['rub']} ₽\n\n"
+            "Нажмите кнопку ниже для перехода к оплате."
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💸 Оплатить", url=pay_url)],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="platega")]
+        ])
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception as e:
+        logging.error(f"Platega error: {e}")
+        await call.answer("❌ Произошла ошибка", show_alert=True)
+    await call.answer()
 
         # --- ВОТ ЭТОТ БЛОК НУЖНО ДОБАВИТЬ ---
         async with aiosqlite.connect(DB_NAME) as db:
