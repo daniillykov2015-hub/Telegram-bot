@@ -295,9 +295,8 @@ async def plat_confirm(call: CallbackQuery):
     ])
     await call.message.edit_text(f"<b>Детали платежа:</b>\n\n📦 Тариф: {plan['name']}\n💰 К оплате: {plan['rub']} ₽", reply_markup=kb, parse_mode="HTML")
     await call.answer()
-        # ------------------------------------
-
-        text = (
+        # -------------------------------- 
+    text = (
             "<b>Проверьте детали платежа:</b>\n\n"
             f"📦 Тариф: {plan['name']}\n"
             "💳 Способ оплаты: Карта / СБП (Platega)\n"
