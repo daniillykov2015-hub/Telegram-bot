@@ -193,7 +193,7 @@ await db.execute("""
             status TEXT DEFAULT 'pending'
         )""")
         # --- СЮДА ВСТАВЛЯЕМ НОВУЮ ТАБЛИЦУ ---
-        await db.execute("""
+await db.execute("""
         CREATE TABLE IF NOT EXISTS platega_invoices (
             invoice_id TEXT PRIMARY KEY,
             user_id INTEGER,
