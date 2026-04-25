@@ -257,7 +257,10 @@ def main_menu_kb():
 @router.callback_query(F.data == "stars")
 async def stars_menu(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"{p['name']} — {p['stars']}⭐", callback_data=f"stars:{k}")]
+        [InlineKeyboardButton(
+            text=f"{p['name']} — {p['stars']}⭐",
+            callback_data=f"stars_plan:{k}"
+        )]
         for k, p in PLANS.items()
     ] + [
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
@@ -271,7 +274,37 @@ async def stars_menu(call: CallbackQuery):
     await call.answer()
 
 
-@router.callback_query(F.data.startswith("stars:"))
+@router.callback_query(F.data.startswith("stars_plan:"))
+async def stars_plan(call: CallbackQuery):
+    plan_id = call.data.split(":")[1]
+    plan = PLANS.get(plan_id)
+
+    if not plan:
+        await call.answer("❌ Тариф не найден", show_alert=True)
+        return
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="💸 Оплатить",
+            callback_data=f"stars_pay:{plan_id}"
+        )],
+        [InlineKeyboardButton(
+            text="⬅ Назад",
+            callback_data="stars"
+        )]
+    ])
+
+    await call.message.edit_text(
+        f"⭐ <b>{plan['name']}</b>\n\n"
+        f"💰 Цена: {plan['stars']}⭐\n\n"
+        "Нажми «Оплатить» для перехода к оплате",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("stars_pay:"))
 async def stars_pay(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
     plan = PLANS.get(plan_id)
