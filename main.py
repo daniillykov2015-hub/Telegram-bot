@@ -300,8 +300,10 @@ async def card_confirm(call: CallbackQuery):
         logger.info(f"Platega payment | user={call.from_user.id} plan={plan_id}")
 
         payload = {
-            "amount": float(plan["rub"]),
-            "currency": "RUB",
+            "paymentDetails": {
+                "amount": float(plan["rub"]),
+                "currency": "RUB"
+            },
             "order_id": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}",
             "description": f"Подписка {plan['name']}"
         }
@@ -324,14 +326,15 @@ async def card_confirm(call: CallbackQuery):
             logger.info(f"PLATEGA RAW RESPONSE: {text}")
 
             if resp.status != 200:
-                await call.message.answer(f"❌ Ошибка Platega: {resp.status}\n{text}")
+                await call.message.answer(f"❌ Ошибка Platega {resp.status}\n{text}")
                 await call.answer()
                 return
 
             try:
-                data = json.loads(text)
+                data = await resp.json()
             except Exception:
                 await call.message.answer("❌ Platega вернул не JSON")
+                await call.answer()
                 return
 
         # ================= LINK =================
@@ -353,7 +356,7 @@ async def card_confirm(call: CallbackQuery):
                 )
 
         if not pay_url:
-            await call.message.answer(f"❌ Нет ссылки оплаты\nОтвет: {data}")
+            await call.message.answer(f"❌ Ссылка оплаты не найдена\n{data}")
             await call.answer()
             return
 
