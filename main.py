@@ -333,7 +333,7 @@ async def card_confirm(call: CallbackQuery):
 
     await call.answer()
         # ================= LINK =================
-        pay_url = None
+            pay_url = None
 
         if isinstance(data, dict):
             pay_url = (
