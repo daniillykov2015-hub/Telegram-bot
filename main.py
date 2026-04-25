@@ -766,15 +766,21 @@ async def check_subscriptions():
 
 async def main():
     global http_session
+
     http_session = aiohttp.ClientSession()
     await init_db()
-    
-    asyncio.create_task(crypto_checker())
-    asyncio.create_task(card_checker())
-    asyncio.create_task(check_subscriptions())
-    
-    await dp.start_polling(bot)
-    await http_session.close()
+
+    # создаём задачи НО правильно
+    loop = asyncio.get_running_loop()
+
+    loop.create_task(crypto_checker())
+    loop.create_task(card_checker())
+    loop.create_task(check_subscriptions())
+
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await http_session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
