@@ -251,72 +251,7 @@ def main_menu_kb():
         ],
         [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
     ])
-# ================== HANDLERS ==================import os
-import asyncio
-import logging
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.filters import Command
-
-# Берем токен из твоего конфига
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-
-if not TOKEN:
-    print("❌ ОШИБКА: Переменная TELEGRAM_BOT_TOKEN не найдена!")
-    exit()
-
-bot = Bot(token=TOKEN)
-dp = Dispatcher()
-
-# 1. Основное окно оплаты (Инвойс)
-@dp.message(Command("pay"))
-async def send_payment_invoice(message: types.Message):
-    builder = InlineKeyboardBuilder()
-    
-    # Кнопка оплаты (pay=True добавляет стрелочку в углу)
-    builder.row(types.InlineKeyboardButton(text="💸 Оплатить", pay=True))
-    # Кнопка возврата
-    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_menu"))
-
-    await message.answer_invoice(
-        title="Проверьте детали платежа:",
-        description=(
-            "📦 Тариф: Mini\n"
-            "📅 Срок: 1 месяц\n"
-            "💳 Способ оплаты: ⭐ Telegram Stars\n"
-            "💰 К оплате: 120 ⭐\n\n"
-            "Нажмите 💸 Оплатить, чтобы перейти к оплате."
-        ),
-        payload="month_sub_120",      # Технический ID (не виден юзеру)
-        currency="XTR",               # Строго XTR для звезд
-        prices=[
-            types.LabeledPrice(label="Подписка Mini", amount=120)
-        ],
-        provider_token="",            # Для звезд всегда пусто
-        reply_markup=builder.as_markup()
-    )
-
-# 2. Обязательный ответ на запрос системы перед оплатой
-@dp.pre_checkout_query()
-async def process_pre_checkout(pre_checkout_query: types.PreCheckoutQuery):
-    await pre_checkout_query.answer(ok=True)
-
-# 3. Обработка успешного завершения (когда появилось окно с подтверждением)
-@dp.message(F.successful_payment)
-async def on_successful_payment(message: types.Message):
-    await message.answer("✅ Оплата прошла успешно! Ваша подписка активирована.")
-
-# Запуск
-async def main():
-    logging.basicConfig(level=logging.INFO)
-    try:
-        await dp.start_polling(bot)
-    finally:
-        await bot.session.close()
-
-if __name__ == "__main__":
-    asyncio.run(main())
-
+# ================== HANDLERS ==================
 @router.callback_query(F.data == "pay_card")
 async def pay_card(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
