@@ -271,14 +271,35 @@ async def stars_confirm(call: CallbackQuery):
         await call.answer("Тариф не найден")
         return
 
-    # Отправляем инвойс. Именно этот метод создает кнопку со "стрелочкой"
+    # Формируем текст как в других способах оплаты
+    text = (
+        "<b>Проверьте детали платежа:</b>\n\n"
+        f"📦 Тариф: {plan['name']}\n"
+        f"🗓 Срок: {plan['name']}\n"
+        "💳 Способ оплаты: ⭐ Telegram Stars\n"
+        f"💰 К оплате: {plan['stars']} ⭐\n\n"
+        "Нажмите 💸 Оплатить, чтобы перейти к подтверждению."
+    )
+
+    # Важный момент: мы сначала удаляем старое меню и отправляем инвойс, 
+    # так как инвойс нельзя "вставить" в существующее текстовое сообщение через edit_text
+    await call.message.delete()
+
+    # Создаем клавиатуру ДЛЯ ИНВОЙСА
+    # В инвойсе ПЕРВАЯ кнопка всегда должна быть кнопкой оплаты (pay=True)
+    invoice_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"💸 Оплатить {plan['stars']} ⭐", pay=True)],
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
+    ])
+
     await call.message.answer_invoice(
         title=f"Подписка: {plan['name']}",
         description=f"Доступ в закрытый канал на {plan['name']}",
-        prices=[LabeledPrice(label="X", amount=plan['stars'])],
-        provider_token="", # Для Stars токен провайдера должен быть пустым
+        prices=[LabeledPrice(label="Stars", amount=plan['stars'])],
+        provider_token="",
         payload=f"stars_{plan_id}",
-        currency="XTR" # Код валюты для Telegram Stars
+        currency="XTR",
+        reply_markup=invoice_kb # Привязываем нашу клавиатуру с кнопкой "Назад"
     )
     await call.answer()
 
