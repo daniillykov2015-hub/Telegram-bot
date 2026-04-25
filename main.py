@@ -311,6 +311,7 @@ async def start(message: Message):
 async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=main_menu_kb())
 # --- PLATEGA ---@router.callback_query(F.data.startswith("card_confirm:"))
+@router.callback_query(F.data.startswith("card_confirm:"))
 async def card_confirm(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
     plan = PLANS.get(plan_id)
@@ -331,16 +332,6 @@ async def card_confirm(call: CallbackQuery):
             "description": f"TgId:{call.from_user.id} UserId:{call.from_user.id} | {plan['name']}",
             "payload": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}"
         }
-
-        # 💾 СОХРАНЕНИЕ В БД
-        payload_str = payload["payload"]
-
-        async with aiosqlite.connect(DB_NAME) as db:
-            await db.execute("""
-                INSERT OR IGNORE INTO card_invoices (payload, user_id, plan_id, status)
-                VALUES (?, ?, ?, 'pending')
-            """, (payload_str, call.from_user.id, plan_id))
-            await db.commit()
 
         logger.info(f"PLATEGA REQUEST: {payload}")
 
@@ -369,6 +360,54 @@ async def card_confirm(call: CallbackQuery):
             except Exception:
                 await call.message.answer("❌ Platega вернул не JSON")
                 await call.answer()
+                return
+
+        # ===== ВАЖНО: ВЫНЕСЕНО НА УРОВЕНЬ ФУНКЦИИ =====
+        pay_url = None
+
+        if isinstance(data, dict):
+            pay_url = (
+                data.get("url")
+                or data.get("redirect")
+                or data.get("payment_url")
+            )
+
+            result = data.get("result")
+            if not pay_url and isinstance(result, dict):
+                pay_url = (
+                    result.get("url")
+                    or result.get("redirect")
+                    or result.get("payment_url")
+                )
+
+        if not pay_url:
+            await call.message.answer(f"❌ Ссылка оплаты не найдена\n{text}")
+            await call.answer()
+            return
+
+        text_msg = (
+            "<b>💳 Оплата подписки</b>\n\n"
+            f"📦 Тариф: {plan['name']}\n"
+            f"💰 Сумма: {plan['rub']} ₽\n"
+            f"🕒 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        )
+
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💸 Оплатить", url=pay_url)],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="pay_card")]
+        ])
+
+        await call.message.edit_text(
+            text_msg,
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+
+    except Exception as e:
+        logger.exception(f"PLATEGA ERROR: {e}")
+        await call.message.answer("❌ Ошибка подключения к платёжной системе")
+
+    await call.answer()
                 return
 
         # ================= LINK =================
