@@ -251,30 +251,31 @@ def main_menu_kb():
         ],
         [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
     ])
-# ================== HANDLERS ==================
-import os
+# ================== HANDLERS ==================import os
 import asyncio
 import logging
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.filters import Command
 
-# Безопасная загрузка токена из Secrets Replit
-TOKEN = os.getenv("TOKEN")
+# Берем токен из твоего конфига
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 if not TOKEN:
-    print("❌ ОШИБКА: Токен не найден в Secrets! Добавь переменную TOKEN в панель Secrets.")
+    print("❌ ОШИБКА: Переменная TELEGRAM_BOT_TOKEN не найдена!")
     exit()
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# 1. Хендлер для вызова окна оплаты (например, по команде /pay)
+# 1. Основное окно оплаты (Инвойс)
 @dp.message(Command("pay"))
 async def send_payment_invoice(message: types.Message):
     builder = InlineKeyboardBuilder()
-    # pay=True — это критически важно для появления стрелочки
+    
+    # Кнопка оплаты (pay=True добавляет стрелочку в углу)
     builder.row(types.InlineKeyboardButton(text="💸 Оплатить", pay=True))
+    # Кнопка возврата
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_menu"))
 
     await message.answer_invoice(
@@ -286,26 +287,26 @@ async def send_payment_invoice(message: types.Message):
             "💰 К оплате: 120 ⭐\n\n"
             "Нажмите 💸 Оплатить, чтобы перейти к оплате."
         ),
-        payload="sub_mini_1month", # Уникальный ID платежа для твоей системы
-        currency="XTR",            # Код валюты для Telegram Stars
-        prices=[types.LabeledPrice(label="Подписка Mini", amount=120)],
-        provider_token="",         # Для Stars всегда остается пустым
+        payload="month_sub_120",      # Технический ID (не виден юзеру)
+        currency="XTR",               # Строго XTR для звезд
+        prices=[
+            types.LabeledPrice(label="Подписка Mini", amount=120)
+        ],
+        provider_token="",            # Для звезд всегда пусто
         reply_markup=builder.as_markup()
     )
 
-# 2. Обязательное подтверждение (Pre-Checkout Query)
-# Без этого шага кнопка 'Подтвердить и заплатить' выдаст ошибку
+# 2. Обязательный ответ на запрос системы перед оплатой
 @dp.pre_checkout_query()
 async def process_pre_checkout(pre_checkout_query: types.PreCheckoutQuery):
     await pre_checkout_query.answer(ok=True)
 
-# 3. Обработка успешного платежа (когда появились конфетти)
+# 3. Обработка успешного завершения (когда появилось окно с подтверждением)
 @dp.message(F.successful_payment)
 async def on_successful_payment(message: types.Message):
-    # Здесь можно добавить логику записи в базу данных
-    await message.answer("✅ Оплата прошла успешно! Ваша подписка активирована. Приятного пользования!")
+    await message.answer("✅ Оплата прошла успешно! Ваша подписка активирована.")
 
-# Запуск бота
+# Запуск
 async def main():
     logging.basicConfig(level=logging.INFO)
     try:
