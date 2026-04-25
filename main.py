@@ -252,6 +252,59 @@ def main_menu_kb():
         [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
     ])
 # ================== HANDLERS ==================
+import asyncio
+import logging
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.filters import Command
+
+# Вставь свой токен из BotFather (лучше через os.getenv)
+TOKEN = "ТВОЙ_ТОКЕН_ЗДЕСЬ"
+
+bot = Bot(token=TOKEN)
+dp = Dispatcher()
+
+# 1. Отправка инвойса (Один блок: Текст + Кнопка оплаты + Назад)
+@dp.message(Command("start"))
+async def show_payment(message: types.Message):
+    builder = InlineKeyboardBuilder()
+    # pay=True добавляет ту самую стрелочку в углу
+    builder.row(types.InlineKeyboardButton(text="💸 Оплатить", pay=True))
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="back"))
+
+    await message.answer_invoice(
+        title="Проверьте детали платежа:",
+        description=(
+            "📦 Тариф: Mini\n"
+            "📅 Срок: 1 месяц\n"
+            "💳 Способ оплаты: ⭐ Telegram Stars\n"
+            "💰 К оплате: 120 ⭐\n\n"
+            "Нажмите 💸 Оплатить, чтобы перейти к оплате."
+        ),
+        payload="sub_mini_1month", # ID для твоей базы данных
+        currency="XTR",            # XTR = Telegram Stars
+        prices=[types.LabeledPrice(label="Подписка Mini", amount=120)],
+        provider_token="",         # Для Stars всегда пусто
+        reply_markup=builder.as_markup()
+    )
+
+# 2. Обязательное подтверждение перед оплатой (без этого кнопка выдаст ошибку)
+@dp.pre_checkout_query()
+async def pre_checkout_handler(pre_checkout_query: types.PreCheckoutQuery):
+    await pre_checkout_query.answer(ok=True)
+
+# 3. Обработка после успешного платежа
+@dp.message(F.successful_payment)
+async def success_payment(message: types.Message):
+    await message.answer("✅ Оплата прошла успешно! Ваша подписка активирована.")
+
+async def main():
+    logging.basicConfig(level=logging.INFO)
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
 @router.callback_query(F.data == "pay_card")
 async def pay_card(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
