@@ -308,6 +308,10 @@ try:
         if not pay_url:
             await call.message.answer("❌ Ошибка создания платежа")
             return
+
+except Exception as e:
+    logging.error(f"Platega error: {e}")
+    await call.message.answer("❌ Ошибка подключения к платёжной системе")
         text = (
             "<b>Проверьте детали платежа:</b>\n\n"
             f"📦 Тариф: {plan['name']}\n"
