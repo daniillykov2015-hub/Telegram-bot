@@ -273,7 +273,7 @@ async def back(call: CallbackQuery):
 # --- КАРТА / СБП (ПЛАТЕГА) ---
 @router.callback_query(F.data.startswith("card_confirm:"))
 async def card_confirm(call: CallbackQuery):
-    plan_id = call.data.split("_")[2]
+    plan_id = call.data.split(":")[1]
     plan = PLANS.get(plan_id)
 
     if not plan:
@@ -283,32 +283,30 @@ async def card_confirm(call: CallbackQuery):
     try:
         logger.info(f"Platega payment | user={call.from_user.id} plan={plan_id}")
 
-async with http_session.post(
-    "https://app.platega.io/transaction/process",
-    headers={
-        "X-MerchantId": MERCHANT_ID,
-        "X-Secret": PAYMENT_TOKEN,
-        "Content-Type": "application/json"
-    },
-    json={
-        "amount": plan["rub"],
-        "currency": "RUB",
-        "order_id": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}",
-        "description": f"Подписка {plan['name']}"
-    }
-) as resp:
+        async with http_session.post(
+            "https://app.platega.io/transaction/process",
+            headers={
+                "X-MerchantId": MERCHANT_ID,
+                "X-Secret": PAYMENT_TOKEN,
+                "Content-Type": "application/json"
+            },
+            json={
+                "amount": plan["rub"],
+                "currency": "RUB",
+                "order_id": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}",
+                "description": f"Подписка {plan['name']}"
+            }
+        ) as resp:
 
-    # 🔴 ВАЖНО: ВСЁ ДОЛЖНО БЫТЬ ВНУТРИ ОТСТУПА
+            if resp.status != 200:
+                logger.error(f"HTTP ERROR: {resp.status}")
+                await call.message.answer("❌ Ошибка платежного сервера")
+                return
 
-    if resp.status != 200:
-        logger.error(f"HTTP ERROR: {resp.status}")
-        await call.message.answer("❌ Ошибка платежного сервера")
-        return
+            data = await resp.json()
+            logger.info(f"PLATEGA RESPONSE: {data}")
 
-    data = await resp.json()
-    logger.info(f"PLATEGA RESPONSE: {data}")
-
-        # ================== LINK PARSER ==================
+        # ================= LINK =================
         pay_url = None
 
         if isinstance(data, dict):
@@ -318,8 +316,8 @@ async with http_session.post(
                 or data.get("payment_url")
             )
 
-            if not pay_url:
-                result = data.get("result", {})
+            if not pay_url and "result" in data:
+                result = data["result"]
                 if isinstance(result, dict):
                     pay_url = (
                         result.get("redirect")
@@ -328,20 +326,14 @@ async with http_session.post(
                     )
 
         if not pay_url:
-            await call.message.answer(
-                "❌ Платёж не создан\n"
-                "Platega не вернула ссылку.\n\n"
-                "Проверь MERCHANT_ID / SECRET / API endpoint"
-            )
+            await call.message.answer("❌ Платёж создан, но ссылка не найдена")
             return
 
-        # ================== UI ==================
         text = (
             "<b>💳 Оплата подписки</b>\n\n"
             f"📦 Тариф: {plan['name']}\n"
             f"💰 Сумма: {plan['rub']} ₽\n"
-            f"🕒 Время: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-            "Нажмите кнопку ниже 👇"
+            f"🕒 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
         )
 
         kb = InlineKeyboardMarkup(inline_keyboard=[
