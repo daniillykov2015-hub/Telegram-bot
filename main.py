@@ -310,8 +310,7 @@ async def start(message: Message):
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=main_menu_kb())
-# --- PLATEGA ---
-@router.callback_query(F.data.startswith("card_confirm:"))
+# --- PLATEGA ---@router.callback_query(F.data.startswith("card_confirm:"))
 async def card_confirm(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
     plan = PLANS.get(plan_id)
@@ -324,7 +323,6 @@ async def card_confirm(call: CallbackQuery):
     try:
         logger.info(f"Platega payment | user={call.from_user.id} plan={plan_id}")
 
-        # Формируем payload согласно документации v2
         payload = {
             "paymentDetails": {
                 "amount": float(plan["rub"]),
@@ -334,7 +332,7 @@ async def card_confirm(call: CallbackQuery):
             "payload": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}"
         }
 
-        # 💾 СЮДА МЫ ВСТАВИЛИ СОХРАНЕНИЕ В БД
+        # 💾 СОХРАНЕНИЕ В БД
         payload_str = payload["payload"]
 
         async with aiosqlite.connect(DB_NAME) as db:
@@ -394,6 +392,31 @@ async def card_confirm(call: CallbackQuery):
         if not pay_url:
             await call.message.answer(f"❌ Ссылка оплаты не найдена\n{text}")
             await call.answer()
+            return
+
+        text_msg = (
+            "<b>💳 Оплата подписки</b>\n\n"
+            f"📦 Тариф: {plan['name']}\n"
+            f"💰 Сумма: {plan['rub']} ₽\n"
+            f"🕒 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        )
+
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💸 Оплатить", url=pay_url)],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="pay_card")]
+        ])
+
+        await call.message.edit_text(
+            text_msg,
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+
+    except Exception as e:
+        logger.exception(f"PLATEGA ERROR: {e}")
+        await call.message.answer("❌ Ошибка подключения к платёжной системе")
+
+    await call.answer()
             return
 
         text_msg = (
