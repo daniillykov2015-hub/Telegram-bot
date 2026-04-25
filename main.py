@@ -170,6 +170,8 @@ PLANS = {
 # ================== DB LOGIC ==================
 async def init_db():
     async with aiosqlite.connect(DB_NAME) as db:
+
+        # 👤 USERS
         await db.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -177,61 +179,29 @@ async def init_db():
             referrer INTEGER,
             ref_count INTEGER DEFAULT 0,
             bonus_days INTEGER DEFAULT 0
-        )""")
+        )
+        """)
+
+        # 💰 CRYPTO
         await db.execute("""
         CREATE TABLE IF NOT EXISTS crypto_invoices (
             invoice_id TEXT PRIMARY KEY,
             user_id INTEGER,
             plan_id TEXT,
             status TEXT DEFAULT 'pending'
-        )""")
-        await db.commit()
+        )
+        """)
 
-async def get_user(user_id):
-    async with aiosqlite.connect(DB_NAME) as db:
-        async with db.execute("SELECT user_id, expiry, referrer, ref_count, bonus_days FROM users WHERE user_id=?", (user_id,)) as cur:
-            return await cur.fetchone()
-
-async def extend_user(user_id, days, is_bonus=False):
-    async with aiosqlite.connect(DB_NAME) as db:
-        async with db.execute("SELECT expiry, referrer FROM users WHERE user_id=?", (user_id,)) as cur:
-            row = await cur.fetchone()
-        
-        if row and row[0]:
-            current = datetime.fromisoformat(row[0]).replace(tzinfo=timezone.utc)
-            base = max(datetime.now(timezone.utc), current)
-        else:
-            base = datetime.now(timezone.utc)
-
-        new_expiry = base + timedelta(days=days)
+        # 💳 CARD / SBP (ВОТ ЭТО МЫ ДОБАВЛЯЕМ)
         await db.execute("""
-        INSERT INTO users (user_id, expiry) VALUES (?, ?)
-        ON CONFLICT(user_id) DO UPDATE SET expiry=excluded.expiry
-        """, (user_id, new_expiry.isoformat()))
-        
-        # Если это обычная покупка (не бонус) и у пользователя есть пригласитель
-        if not is_bonus and row and row[1]:
-            ref_id = row[1]
-            # Проверяем, есть ли у пригласителя активная подписка (условие начисления бонуса)
-            async with db.execute("SELECT expiry FROM users WHERE user_id=?", (ref_id,)) as cur:
-                ref_row = await cur.fetchone()
-                if ref_row and ref_row[0]:
-                    ref_expiry = datetime.fromisoformat(ref_row[0]).replace(tzinfo=timezone.utc)
-                    if ref_expiry > datetime.now(timezone.utc):
-                        # Начисляем 7 дней пригласителю
-                        await db.execute("""
-                            UPDATE users 
-                            SET ref_count = ref_count + 1, 
-                                bonus_days = bonus_days + 7 
-                            WHERE user_id = ?
-                        """, (ref_id,))
-                        await db.commit()
-                        # Продлеваем срок пригласителю
-                        await extend_user(ref_id, 7, is_bonus=True)
-                        try:
-                            await bot.send_message(ref_id, "💎 <b>Бонус начислен!</b> Ваш друг оплатил подписку, вам добавлено <b>7 дней</b> доступа!")
-                        except:
-                            pass
+        CREATE TABLE IF NOT EXISTS card_invoices (
+            payload TEXT PRIMARY KEY,
+            user_id INTEGER,
+            plan_id TEXT,
+            status TEXT DEFAULT 'pending'
+        )
+        """)
+
         await db.commit()
 
 # ================== KEYBOARDS ==================
