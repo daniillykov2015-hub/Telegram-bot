@@ -308,6 +308,7 @@ async def start(message: Message):
 async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=main_menu_kb())
 # --- PLATEGA ---
+    
 @router.callback_query(F.data.startswith("card_confirm:"))
 async def card_confirm(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
