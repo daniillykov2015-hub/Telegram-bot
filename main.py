@@ -248,7 +248,11 @@ async def extend_user(user_id, days, is_bonus=False):
 def main_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            # Добавляем новую кнопку для Карт и СБП в самый верх
+            # Кнопка для проверки остатка подписки
+            InlineKeyboardButton(text="💎 Моя подписка", callback_data="my_sub"),
+        ],
+        [
+            # Твоя кнопка Platega
             InlineKeyboardButton(text="💳 Карта / СБП (₽)", callback_data="pay_card"),
         ],
         [
@@ -262,6 +266,32 @@ def main_menu_kb():
         [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
     ])
 # ================== HANDLERS ==================
+@router.callback_query(F.data == "my_sub")
+async def my_subscription(call: CallbackQuery):
+    user_data = await get_user(call.from_user.id)
+    
+    if not user_data or not user_data[1]:
+        text = "❌ <b>У вас нет активной подписки.</b>\n\nВыберите тариф ниже, чтобы получить доступ."
+    else:
+        expiry_dt = datetime.fromisoformat(user_data[1]).replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        
+        if expiry_dt > now:
+            diff = expiry_dt - now
+            days = diff.days
+            hours = diff.seconds // 3600
+            text = (
+                "<b>💎 Ваша подписка активна!</b>\n\n"
+                f"⏳ Осталось: <b>{days} дн. и {hours} ч.</b>\n"
+                f"📅 Истекает: <code>{expiry_dt.strftime('%d.%m.%Y %H:%M')}</code> (UTC)"
+            )
+        else:
+            text = "❌ <b>Срок вашей подписки истек.</b>"
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
+    await call.message.edit_text(text, reply_markup=kb)
+    await call.answer()
+
 @router.callback_query(F.data == "pay_card")
 async def pay_card(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
