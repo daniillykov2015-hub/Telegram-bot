@@ -414,27 +414,31 @@ async def card_confirm(call: CallbackQuery):
         logger.info(f"PLATEGA REQUEST: {payload}")
 
         async with http_session.post(
-            "https://app.platega.io/v2/transaction/process",
-            headers={
-                "X-MerchantId": MERCHANT_ID,
-                "X-Secret": PAYMENT_TOKEN,
-                "Content-Type": "application/json"
-            },
-            json=payload
-        ) as resp:
+    "https://app.platega.io/v2/transaction/process",
+    headers={
+        "X-MerchantId": MERCHANT_ID,
+        "X-Secret": PAYMENT_TOKEN,
+        "Content-Type": "application/json"
+    },
+    json=payload
+) as resp:
 
-            text = await resp.text()
-
-            logger.info(f"PLATEGA STATUS: {resp.status}")
-            logger.info(f"PLATEGA RAW RESPONSE: {text}")
-
-if resp.status != 200:
     text = await resp.text()
-    await call.message.answer(
-        f"❌ Ошибка Platega {resp.status}\n{text}"
-    )
-    await call.answer()
-    return
+    logger.info(f"PLATEGA RAW: {text}")
+
+    if resp.status != 200:
+        await call.message.answer(
+            f"❌ Ошибка Platega {resp.status}\n{text}"
+        )
+        await call.answer()
+        return
+
+    try:
+        data = json.loads(text)
+    except Exception:
+        await call.message.answer("❌ Platega вернул не JSON")
+        await call.answer()
+        return
 
 text = await resp.text()
 logger.info(f"PLATEGA RAW: {text}")
