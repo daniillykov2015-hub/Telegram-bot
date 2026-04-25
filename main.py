@@ -148,8 +148,8 @@ PLANS = {
     "1": {
         "name": "1 день", 
         "days": 1,
-        "rub": 10,    
-        "stars": 10,  
+        "rub": 690,    
+        "stars": 790,  
         "crypto": 9    
     },
     "7": {
@@ -178,7 +178,6 @@ async def init_db():
             ref_count INTEGER DEFAULT 0,
             bonus_days INTEGER DEFAULT 0
         )""")
-        
         await db.execute("""
         CREATE TABLE IF NOT EXISTS crypto_invoices (
             invoice_id TEXT PRIMARY KEY,
@@ -186,17 +185,8 @@ async def init_db():
             plan_id TEXT,
             status TEXT DEFAULT 'pending'
         )""")
-
-        # --- ТАБЛИЦА ДЛЯ PLATEGA ---
-        await db.execute("""
-        CREATE TABLE IF NOT EXISTS platega_invoices (
-            payment_id TEXT PRIMARY KEY,
-            user_id INTEGER,
-            plan_id TEXT,
-            status TEXT DEFAULT 'pending'
-        )""")
-
         await db.commit()
+
 async def get_user(user_id):
     async with aiosqlite.connect(DB_NAME) as db:
         async with db.execute("SELECT user_id, expiry, referrer, ref_count, bonus_days FROM users WHERE user_id=?", (user_id,)) as cur:
@@ -248,11 +238,7 @@ async def extend_user(user_id, days, is_bonus=False):
 def main_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            # Кнопка для проверки остатка подписки
-            InlineKeyboardButton(text="💎 Моя подписка", callback_data="my_sub"),
-        ],
-        [
-            # Твоя кнопка Platega
+            # Добавляем новую кнопку для Карт и СБП в самый верх
             InlineKeyboardButton(text="💳 Карта / СБП (₽)", callback_data="pay_card"),
         ],
         [
@@ -266,45 +252,6 @@ def main_menu_kb():
         [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
     ])
 # ================== HANDLERS ==================
-# --- STARS MENU (Превью заказа) ---
-@router.callback_query(F.data.startswith("stars_confirm:"))
-async def stars_confirm_preview(call: CallbackQuery):
-    plan_id = call.data.split(":")[1]
-    plan = PLANS[plan_id]
-    
-    text = (
-        "<b>Проверьте детали платежа:</b>\n\n"
-        f"📦 Тариф: {plan['name']}\n"
-        f"🗓 Срок: {plan['name']}\n"
-        "💳 Способ оплаты: ⭐ Telegram Stars\n"
-        f"💰 К оплате: {plan['stars']} ⭐\n\n"
-        "Нажмите 💸 Оплатить, чтобы перейти к оплате."
-    )
-    
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💸 Оплатить", callback_data=f"stars_pay:{plan_id}")],
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
-    ])
-    
-    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
-    await call.answer()
-
-# --- STARS SEND INVOICE (Сама кнопка "Заплатить") ---
-@router.callback_query(F.data.startswith("stars_pay:"))
-async def stars_pay_invoice(call: CallbackQuery):
-    plan_id = call.data.split(":")[1]
-    plan = PLANS[plan_id]
-    
-    await call.message.answer_invoice(
-        title=f"Подписка: {plan['name']}",
-        description=f"Доступ в канал на {plan['days']} дн.",
-        prices=[LabeledPrice(label=plan["name"], amount=int(plan["stars"]))],
-        payload=f"stars_{plan_id}",
-        provider_token="",
-        currency="XTR"
-    )
-    await call.answer()
-
 @router.callback_query(F.data == "pay_card")
 async def pay_card(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -338,12 +285,6 @@ async def start(message: Message):
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=main_menu_kb())
-
-
-# Команда /help в меню
-@router.message(F.text == "/help")
-async def cmd_help(message: Message):
-    await message.answer("💬 <b>Поддержка</b>\n\nЕсли у вас возникли вопросы по оплате или доступу, пишите: @mistybibi", parse_mode="HTML")
 # --- PLATEGA ---
 @router.callback_query(F.data.startswith("card_confirm:"))
 async def card_confirm(call: CallbackQuery):
@@ -399,7 +340,7 @@ async def card_confirm(call: CallbackQuery):
                 await call.answer()
                 return
 
-# ================= LINK =================
+        # ================= LINK =================
         pay_url = None
 
         if isinstance(data, dict):
@@ -424,20 +365,6 @@ async def card_confirm(call: CallbackQuery):
             await call.answer()
             return
 
-        # --- НОВЫЙ КОД: СОХРАНЯЕМ ТРАНЗАКЦИЮ В БД ---
-        # Вытаскиваем ID транзакции из ответа, чтобы чекер знал, что проверять
-        payment_id = data.get("id") or (result.get("id") if isinstance(result, dict) else None)
-        
-        if payment_id:
-            async with aiosqlite.connect(DB_NAME) as db:
-                await db.execute(
-                    "INSERT INTO platega_invoices (payment_id, user_id, plan_id) VALUES (?, ?, ?)",
-                    (str(payment_id), call.from_user.id, plan_id)
-                )
-                await db.commit()
-            logger.info(f"Platega invoice created: {payment_id} for user {call.from_user.id}")
-        # --------------------------------------------
-
         text_msg = (
             "<b>💳 Оплата подписки</b>\n\n"
             f"📦 Тариф: {plan['name']}\n"
@@ -460,7 +387,7 @@ async def card_confirm(call: CallbackQuery):
         logger.exception(f"PLATEGA ERROR: {e}")
         await call.message.answer("❌ Ошибка подключения к платёжной системе")
 
-    await call.answer()       
+    await call.answer()
 # --- CRYPTO ---
 @router.callback_query(F.data == "crypto")
 async def crypto_menu(call: CallbackQuery):
@@ -583,57 +510,6 @@ async def join(req: ChatJoinRequest):
             return
     await req.decline()
 
-async def platega_checker():
-    while True:
-        try:
-            # 1. Заглядываем в базу и ищем счета со статусом 'pending' (ожидание)
-            async with aiosqlite.connect(DB_NAME) as db:
-                async with db.execute(
-                    "SELECT payment_id, user_id, plan_id FROM platega_invoices WHERE status='pending'"
-                ) as cur:
-                    invoices = await cur.fetchall()
-
-            # 2. Перебираем каждый найденный счет
-            for p_id, u_id, p_id_plan in invoices:
-                # Спрашиваем у Platega статус этой конкретной транзакции
-                async with http_session.get(
-                    f"https://app.platega.io/v2/transaction/{p_id}",
-                    headers={
-                        "X-MerchantId": MERCHANT_ID,
-                        "X-Secret": PAYMENT_TOKEN
-                    }
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        # Получаем статус (обычно 'success' или 'paid')
-                        status = data.get("status") or data.get("result", {}).get("status")
-
-                        if status and status.lower() == "success":
-                            # 3. Если оплачено — начисляем дни!
-                            days = PLANS[p_id_plan]["days"]
-                            await extend_user(u_id, days)
-                            
-                            # Обновляем статус в базе, чтобы больше не проверять этот счет
-                            async with aiosqlite.connect(DB_NAME) as db:
-                                await db.execute(
-                                    "UPDATE platega_invoices SET status='paid' WHERE payment_id=?", 
-                                    (p_id,)
-                                )
-                                await db.commit()
-
-                            # Радуем пользователя сообщением
-                            try:
-                                await bot.send_message(
-                                    u_id, 
-                                    f"✅ <b>Оплата получена!</b>\nВам начислено {days} дн. доступа. Приятного пользования!"
-                                )
-                            except:
-                                pass
-        except Exception as e:
-            logging.error(f"Platega checker error: {e}")
-        
-        # Ждем 30 секунд перед следующей проверкой
-        await asyncio.sleep(30)
 # --- BACKGROUND TASKS ---
 async def crypto_checker():
     while True:
@@ -691,7 +567,6 @@ async def main():
     await init_db()
     
     asyncio.create_task(crypto_checker())
-    asyncio.create_task(platega_checker())
     asyncio.create_task(check_subscriptions())
     
     await dp.start_polling(bot)
