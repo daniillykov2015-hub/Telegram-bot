@@ -149,7 +149,7 @@ PLANS = {
         "name": "1 день", 
         "days": 1,
         "rub": 690,    
-        "stars": 790,  
+        "stars": 10,  
         "crypto": 9    
     },
     "7": {
