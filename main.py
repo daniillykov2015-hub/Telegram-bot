@@ -258,42 +258,43 @@ async def stars_confirm(call: CallbackQuery):
     plan = PLANS.get(plan_id)
     
     if not plan:
-        await call.answer("Тариф не найден")
+        await call.answer("Ошибка: тариф не найден")
         return
 
-    # 1. Генерируем ссылку на оплату (именно она даст стрелочку)
-    invoice_link = await call.bot.create_invoice_link(
-        title=f"Подписка: {plan['name']}",
-        description=f"Доступ в закрытый канал на {plan['name']}",
-        prices=[LabeledPrice(label="Stars", amount=plan['stars'])],
-        payload=f"stars_{plan_id}",
-        currency="XTR",
-        provider_token=""
-    )
+    try:
+        # Генерируем прямую ссылку на оплату звездами
+        invoice_link = await call.bot.create_invoice_link(
+            title=f"Подписка: {plan['name']}",
+            description=f"Доступ в канал на {plan['name']}",
+            payload=f"stars_{plan_id}",
+            provider_token="", # Для Stars всегда пусто
+            currency="XTR",
+            prices=[LabeledPrice(label="⭐", amount=plan['stars'])]
+        )
 
-    # 2. Текст сообщения (копия твоего дизайна)
-    text = (
-        "<b>Проверьте детали платежа:</b>\n\n"
-        f"📦 Тариф: {plan['name']}\n"
-        f"🗓 Срок: {plan['name']}\n"
-        "💳 Способ оплаты: ⭐ Telegram Stars\n"
-        f"💰 К оплате: {plan['stars']} ⭐\n\n"
-        "Нажмите 💸 Оплатить, чтобы перейти к оплате."
-    )
+        # Текст один в один как на твоем скрине
+        text = (
+            "<b>Проверьте детали платежа:</b>\n\n"
+            f"📦 Тариф: {plan['name']}\n"
+            f"🗓 Срок: {plan['name']}\n"
+            "💳 Способ оплаты: ⭐ Telegram Stars\n"
+            f"💰 К оплате: {plan['stars']} ⭐\n\n"
+            "Нажмите 💸 Оплатить, чтобы перейти к оплате."
+        )
 
-    # 3. Клавиатура с URL-кнопкой (появится та самая стрелочка)
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💸 Оплатить", url=invoice_link)],
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
-    ])
+        # Кнопка со ссылкой (даст стрелочку) и кнопка назад
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💸 Оплатить", url=invoice_link)],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
+        ])
 
-    # 4. Редактируем текущее сообщение
-    await call.message.edit_text(
-        text=text,
-        reply_markup=kb,
-        parse_mode="HTML"
-    )
-    await call.answer()
+        await call.message.edit_text(text, reply_markup=kb)
+        await call.answer()
+
+    except Exception as e:
+        # Если ссылка не создалась (например, не настроены платежи в BotFather)
+        print(f"Ошибка при создании счета: {e}")
+        await call.answer("❌ Ошибка при формировании счета. Проверьте настройки BotFather.", show_alert=True)
 
 @router.callback_query(F.data == "pay_card")
 async def pay_card(call: CallbackQuery):
