@@ -663,7 +663,7 @@ async def card_checker():
                         or data.get("result", {}).get("status")
                     )
 
-                    if status == "paid":
+                    if status in ["paid", "success", "completed"]:
                         days = PLANS[plan_id]["days"]
 
                         await extend_user(user_id, days)
