@@ -252,62 +252,56 @@ def main_menu_kb():
         [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
     ])
 # ================== HANDLERS ==================
+from aiogram import F, bot
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice
+
 @router.callback_query(F.data == "stars")
 async def stars_menu(call: CallbackQuery):
-    # Вместо текстового меню сразу выводим список тарифов. 
-    # Но если ты хочешь, чтобы при клике на "Stars" сразу вылетал счет, 
-    # нужно выбрать один конкретный plan_id.
+    # Формируем меню выбора тарифа (как на твоем третьем фото)
+    buttons = []
+    for k, p in PLANS.items():
+        buttons.append([InlineKeyboardButton(
+            text=f"{p['name']} — {p['stars']} ⭐", 
+            callback_data=f"stars_plan_info:{k}"
+        )])
     
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text=f"Выбрать {p['name']} — {p['stars']}⭐",
-            callback_data=f"stars_pay:{k}"
-        )]
-        for k, p in PLANS.items()
-    ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
+    buttons.append([InlineKeyboardButton(text="⬅ Назад", callback_data="back")])
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
 
-    await call.message.edit_text(
-        "⭐ <b>Выберите тариф для оплаты:</b>",
-        reply_markup=kb,
-        parse_mode="HTML"
-    )
+    await call.message.edit_text("⭐ <b>Выберите период подписки Stars:</b>", reply_markup=kb, parse_mode="HTML")
     await call.answer()
 
-
-@router.callback_query(F.data.startswith("stars_pay:"))
-async def stars_pay(call: CallbackQuery):
+@router.callback_query(F.data.startswith("stars_plan_info:"))
+async def stars_plan_info(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
     plan = PLANS.get(plan_id)
 
-    if not plan:
-        await call.answer("❌ Тариф не найден", show_alert=True)
-        return
+    # Генерируем прямую ссылку на оплату Stars
+    invoice_link = await call.bot.create_invoice_link(
+        title=f"Тариф: {plan['name']}",
+        description=f"Срок: {plan.get('duration', '1 месяц')}\nСпособ оплаты: Telegram Stars",
+        payload=f"stars_{plan_id}",
+        provider_token="", # Пусто для Stars
+        currency="XTR",
+        prices=[LabeledPrice(label=plan["name"], amount=plan["stars"])]
+    )
 
-    # Удаляем предыдущее сообщение-меню, чтобы чат был чистым
-    await call.message.delete()
+    # Текст сообщения как на твоем первом фото
+    text = (
+        f"Проверьте детали платежа:\n\n"
+        f"📦 Тариф: <b>{plan['name']}</b>\n"
+        f"🗓 Срок: <b>{plan.get('duration', '1 месяц')}</b>\n"
+        f"💳 Способ оплаты: ⭐ <b>Telegram Stars</b>\n"
+        f"💰 К оплате: <b>{plan['stars']} ⭐</b>\n\n"
+        f"Нажмите 💸 <b>Оплатить</b>, чтобы перейти к оплате."
+    )
 
-    # Отправляем инвойс. Именно он создаст "пузырь" с кнопкой как на фото.
-    try:
-        await bot.send_invoice(
-            chat_id=call.from_user.id,
-            title=f"Тариф: {plan['name']}",
-            description=f"Доступ в канал на {plan.get('duration', '1 мес.')}",
-            payload=f"stars_{plan_id}",
-            provider_token="",  # Для Stars всегда пусто
-            currency="XTR",
-            prices=[
-                LabeledPrice(
-                    label=f"Оплата {plan['name']}", 
-                    amount=plan["stars"]
-                )
-            ],
-            # Эта настройка сделает кнопку оплаты основной
-            start_parameter="pay_star_subscription"
-        )
-    except Exception as e:
-        logger.exception(f"Error sending invoice: {e}")
-        await call.message.answer("❌ Произошла ошибка при формировании счета.")
-    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💸 Оплатить", url=invoice_link)], # Ссылка дает стрелочку
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
+    ])
+
+    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     await call.answer()
 
 @router.callback_query(F.data == "pay_card")
