@@ -252,16 +252,26 @@ def main_menu_kb():
         [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
     ])
 # ================== HANDLERS ==================
-from aiogram import F, Router
+import logging
+from aiogram import F, Router, Bot
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice, PreCheckoutQuery
 
+# Инициализируем роутер
 router = Router()
+logger = logging.getLogger(__name__)
+
+# Пример словаря тарифов (убедись, что он у тебя есть в коде)
+PLANS = {
+    "1_day": {"name": "1 день", "stars": 550, "duration": "1 день"},
+    "7_days": {"name": "7 дней", "stars": 770, "duration": "7 дней"},
+    "30_days": {"name": "30 дней", "stars": 1100, "duration": "30 дней"},
+}
 
 # ================== ⭐ TELEGRAM STARS PAYMENT ==================
 
 @router.callback_query(F.data == "stars")
 async def stars_menu(call: CallbackQuery):
-    """Выбор тарифа (как на твоем 3-м фото)"""
+    """Меню выбора тарифа (как на фото 3)"""
     buttons = []
     for k, p in PLANS.items():
         buttons.append([InlineKeyboardButton(
@@ -282,7 +292,7 @@ async def stars_menu(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("stars_plan_info:"))
 async def stars_plan_info(call: CallbackQuery):
-    """Детали платежа и кнопка оплаты (как на твоем 1-м и 2-м фото)"""
+    """Детали платежа (как на фото 1)"""
     plan_id = call.data.split(":")[1]
     plan = PLANS.get(plan_id)
 
@@ -290,38 +300,43 @@ async def stars_plan_info(call: CallbackQuery):
         await call.answer("❌ Тариф не найден", show_alert=True)
         return
 
-    # Создаем прямую ссылку на инвойс для мгновенного открытия окна оплаты
-    invoice_link = await call.bot.create_invoice_link(
-        title=f"Тариф: {plan['name']}",
-        description=f"Доступ в канал на {plan.get('duration', '1 месяц')}",
-        payload=f"stars_{plan_id}",
-        provider_token="", # Для Stars всегда пусто
-        currency="XTR",
-        prices=[LabeledPrice(label=plan["name"], amount=plan["stars"])]
-    )
+    try:
+        # Генерируем ссылку, которая откроет окно (как на фото 2)
+        invoice_link = await call.bot.create_invoice_link(
+            title=f"Тариф: {plan['name']}",
+            description=f"Доступ в канал на {plan['duration']}",
+            payload=f"stars_{plan_id}",
+            provider_token="",  # Пусто для Telegram Stars
+            currency="XTR",
+            prices=[LabeledPrice(label=plan["name"], amount=plan["stars"])]
+        )
 
-    text = (
-        f"Проверьте детали платежа:\n\n"
-        f"📦 Тариф: <b>{plan['name']}</b>\n"
-        f"🗓 Срок: <b>{plan.get('duration', '1 месяц')}</b>\n"
-        f"💳 Способ оплаты: ⭐ <b>Telegram Stars</b>\n"
-        f"💰 К оплате: <b>{plan['stars']} ⭐</b>\n\n"
-        f"Нажмите 💸 <b>Оплатить</b>, чтобы перейти к оплате."
-    )
+        text = (
+            f"Проверьте детали платежа:\n\n"
+            f"📦 Тариф: <b>{plan['name']}</b>\n"
+            f"🗓 Срок: <b>{plan['duration']}</b>\n"
+            f"💳 Способ оплаты: ⭐ <b>Telegram Stars</b>\n"
+            f"💰 К оплате: <b>{plan['stars']} ⭐</b>\n\n"
+            f"Нажмите 💸 <b>Оплатить</b>, чтобы перейти к оплате."
+        )
 
-    # Кнопка с url автоматически получит стрелочку «↗»
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💸 Оплатить", url=invoice_link)],
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
-    ])
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💸 Оплатить", url=invoice_link)],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
+        ])
 
-    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        
+    except Exception as e:
+        logger.exception(f"Ошибка при создании счета Stars: {e}")
+        await call.answer("❌ Ошибка формирования счета", show_alert=True)
+    
     await call.answer()
 
 
 @router.pre_checkout_query()
 async def pre_checkout_handler(pre_checkout_query: PreCheckoutQuery):
-    """Обязательный обработчик подтверждения платежа (серверный аппрув)"""
+    """Подтверждение платежа перед финальной оплатой (Обязательно!)"""
     await pre_checkout_query.answer(ok=True)
 
 @router.callback_query(F.data == "pay_card")
