@@ -299,15 +299,14 @@ async def card_confirm(call: CallbackQuery):
     try:
         logger.info(f"Platega payment | user={call.from_user.id} plan={plan_id}")
 
-        # ================= PAYLOAD =================
         payload = {
-            "command": "create",
             "paymentDetails": {
                 "amount": float(plan["rub"]),
                 "currency": "RUB"
             },
             "order_id": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}",
-            "description": f"Подписка {plan['name']}"
+            "description": f"Подписка {plan['name']}",
+            "paymentMethod": "CARD"
         }
 
         logger.info(f"PLATEGA REQUEST: {payload}")
@@ -362,7 +361,6 @@ async def card_confirm(call: CallbackQuery):
             await call.answer()
             return
 
-        # ================= MESSAGE =================
         text_msg = (
             "<b>💳 Оплата подписки</b>\n\n"
             f"📦 Тариф: {plan['name']}\n"
@@ -375,7 +373,11 @@ async def card_confirm(call: CallbackQuery):
             [InlineKeyboardButton(text="⬅ Назад", callback_data="pay_card")]
         ])
 
-        await call.message.edit_text(text_msg, reply_markup=kb, parse_mode="HTML")
+        await call.message.edit_text(
+            text_msg,
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
 
     except Exception as e:
         logger.exception(f"PLATEGA ERROR: {e}")
