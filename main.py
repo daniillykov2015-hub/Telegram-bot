@@ -299,21 +299,22 @@ async def card_confirm(call: CallbackQuery):
     try:
         logger.info(f"Platega payment | user={call.from_user.id} plan={plan_id}")
 
+        # Формируем payload согласно документации v2
         payload = {
-            "command": "Create",
             "paymentDetails": {
                 "amount": float(plan["rub"]),
                 "currency": "RUB"
             },
-            "order_id": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}",
-            "description": f"Подписка {plan['name']}",
-            "paymentMethod": "Card"
+            # Обязательный формат для описания (без пробелов после двоеточия для ID)
+            "description": f"TgId:{call.from_user.id} UserId:{call.from_user.id} | {plan['name']}",
+            # Ваш внутренний ID заказа для отслеживания
+            "payload": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}"
         }
 
         logger.info(f"PLATEGA REQUEST: {payload}")
 
         async with http_session.post(
-            "https://app.platega.io/transaction/process",
+            "https://app.platega.io/v2/transaction/process", # Добавлен v2
             headers={
                 "X-MerchantId": MERCHANT_ID,
                 "X-Secret": PAYMENT_TOKEN,
@@ -343,17 +344,19 @@ async def card_confirm(call: CallbackQuery):
         pay_url = None
 
         if isinstance(data, dict):
+            # Проверяем все возможные ключи ссылки в ответе
             pay_url = (
-                data.get("redirect")
-                or data.get("url")
+                data.get("url") 
+                or data.get("redirect") 
                 or data.get("payment_url")
             )
-
+            
+            # Если ссылка вложена в объект result
             result = data.get("result")
             if not pay_url and isinstance(result, dict):
                 pay_url = (
-                    result.get("redirect")
-                    or result.get("url")
+                    result.get("url") 
+                    or result.get("redirect") 
                     or result.get("payment_url")
                 )
 
@@ -385,7 +388,6 @@ async def card_confirm(call: CallbackQuery):
         await call.message.answer("❌ Ошибка подключения к платёжной системе")
 
     await call.answer()
-
 # --- CRYPTO ---
 @router.callback_query(F.data == "crypto")
 async def crypto_menu(call: CallbackQuery):
