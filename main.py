@@ -252,6 +252,36 @@ def main_menu_kb():
         [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
     ])
 # ================== HANDLERS ==================
+@router.callback_query(F.data == "stars")
+async def stars_menu(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"{p['name']} — {p['stars']} ⭐", callback_data=f"stars_confirm:{k}")]
+        for k, p in PLANS.items()
+    ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
+    
+    await call.message.edit_text("⭐ Выберите тариф для оплаты Telegram Stars:", reply_markup=kb)
+    await call.answer()
+
+@router.callback_query(F.data.startswith("stars_confirm:"))
+async def stars_confirm(call: CallbackQuery):
+    plan_id = call.data.split(":")[1]
+    plan = PLANS.get(plan_id)
+    
+    if not plan:
+        await call.answer("Тариф не найден")
+        return
+
+    # Отправляем инвойс. Именно этот метод создает кнопку со "стрелочкой"
+    await call.message.answer_invoice(
+        title=f"Подписка: {plan['name']}",
+        description=f"Доступ в закрытый канал на {plan['name']}",
+        prices=[LabeledPrice(label="X", amount=plan['stars'])],
+        provider_token="", # Для Stars токен провайдера должен быть пустым
+        payload=f"stars_{plan_id}",
+        currency="XTR" # Код валюты для Telegram Stars
+    )
+    await call.answer()
+
 @router.callback_query(F.data == "pay_card")
 async def pay_card(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
