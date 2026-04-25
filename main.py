@@ -287,6 +287,34 @@ async def stars_plan(call: CallbackQuery):
     )
     await call.answer()
 
+@router.callback_query(F.data.startswith("stars_pay:"))
+async def stars_pay(call: CallbackQuery):
+    plan_id = call.data.split(":")[1]
+    plan = PLANS[plan_id]
+
+    try:
+        await bot.send_invoice(
+            chat_id=call.from_user.id,
+            title="⭐ Подписка",
+            description=f"{plan['name']} доступ к закрытому каналу",
+            payload=f"stars_{plan_id}",
+            provider_token="",  # для Stars всегда пустой
+            currency="XTR",
+            prices=[
+                LabeledPrice(
+                    label=plan["name"],
+                    amount=plan["stars"]
+                )
+            ]
+        )
+
+        await call.answer()
+
+    except Exception as e:
+        logger.exception(f"Stars payment error: {e}")
+        await call.message.answer("❌ Ошибка открытия оплаты Stars")
+        await call.answer()
+
 @router.callback_query(F.data == "pay_card")
 async def pay_card(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
