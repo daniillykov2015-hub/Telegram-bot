@@ -413,7 +413,7 @@ async def card_confirm(call: CallbackQuery):
 
         logger.info(f"PLATEGA REQUEST: {payload}")
 
-        async with http_session.post(
+async with http_session.post(
     "https://app.platega.io/v2/transaction/process",
     headers={
         "X-MerchantId": MERCHANT_ID,
