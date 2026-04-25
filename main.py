@@ -168,15 +168,6 @@ PLANS = {
     },
 }
 # ================== DB LOGIC ==================
-await db.execute("""
-CREATE TABLE IF NOT EXISTS card_invoices (
-    payload TEXT PRIMARY KEY,
-    user_id INTEGER,
-    plan_id TEXT,
-    status TEXT DEFAULT 'pending'
-)
-""")
-
 async def init_db():
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("""
