@@ -259,7 +259,13 @@ async def stars_menu(call: CallbackQuery):
         for k, p in PLANS.items()
     ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
     
-    await call.message.edit_text("⭐ Выберите тариф для оплаты Telegram Stars:", reply_markup=kb)
+    # Если мы вернулись назад из инвойса, сообщение может быть уже удалено, 
+    # поэтому используем try-except или answer/send
+    try:
+        await call.message.edit_text("⭐ Выберите тариф для оплаты Telegram Stars:", reply_markup=kb)
+    except:
+        await call.message.answer("⭐ Выберите тариф для оплаты Telegram Stars:", reply_markup=kb)
+        await call.message.delete()
     await call.answer()
 
 @router.callback_query(F.data.startswith("stars_confirm:"))
@@ -271,7 +277,7 @@ async def stars_confirm(call: CallbackQuery):
         await call.answer("Тариф не найден")
         return
 
-    # Формируем текст как в других способах оплаты
+    # Текст в точности как на Фото 2
     text = (
         "<b>Проверьте детали платежа:</b>\n\n"
         f"📦 Тариф: {plan['name']}\n"
@@ -281,14 +287,13 @@ async def stars_confirm(call: CallbackQuery):
         "Нажмите 💸 Оплатить, чтобы перейти к подтверждению."
     )
 
-    # Важный момент: мы сначала удаляем старое меню и отправляем инвойс, 
-    # так как инвойс нельзя "вставить" в существующее текстовое сообщение через edit_text
+    # Удаляем предыдущее меню, чтобы инвойс встал на его место
     await call.message.delete()
 
-    # Создаем клавиатуру ДЛЯ ИНВОЙСА
-    # В инвойсе ПЕРВАЯ кнопка всегда должна быть кнопкой оплаты (pay=True)
-    invoice_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"💸 Оплатить {plan['stars']} ⭐", pay=True)],
+    # Формируем клавиатуру. 
+    # ПЕРВАЯ кнопка должна быть pay=True, тогда появится стрелочка и системное окно
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💸 Оплатить", pay=True)],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
     ])
 
@@ -296,10 +301,10 @@ async def stars_confirm(call: CallbackQuery):
         title=f"Подписка: {plan['name']}",
         description=f"Доступ в закрытый канал на {plan['name']}",
         prices=[LabeledPrice(label="Stars", amount=plan['stars'])],
-        provider_token="",
+        provider_token="", # Обязательно пусто для Stars
         payload=f"stars_{plan_id}",
         currency="XTR",
-        reply_markup=invoice_kb # Привязываем нашу клавиатуру с кнопкой "Назад"
+        reply_markup=kb # Наша кнопка "Назад" теперь здесь
     )
     await call.answer()
 
