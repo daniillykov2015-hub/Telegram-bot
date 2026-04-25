@@ -299,6 +299,15 @@ async def card_confirm(call: CallbackQuery):
     try:
         logger.info(f"Platega payment | user={call.from_user.id} plan={plan_id}")
 
+        payload = {
+            "amount": float(plan["rub"]),
+            "currency": "RUB",
+            "order_id": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}",
+            "description": f"Подписка {plan['name']}"
+        }
+
+        logger.info(f"PLATEGA REQUEST: {payload}")
+
         async with http_session.post(
             "https://app.platega.io/transaction/process",
             headers={
@@ -306,26 +315,24 @@ async def card_confirm(call: CallbackQuery):
                 "X-Secret": PAYMENT_TOKEN,
                 "Content-Type": "application/json"
             },
-            json={
-                "paymentDetails": {
-                    "amount": plan["rub"],
-                    "currency": "RUB"
-                },
-                "order_id": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}",
-                "description": f"Подписка {plan['name']}"
-            }
+            json=payload
         ) as resp:
 
             text = await resp.text()
-            logger.error(f"PLATEGA RAW RESPONSE: {text}")
+
+            logger.info(f"PLATEGA STATUS: {resp.status}")
+            logger.info(f"PLATEGA RAW RESPONSE: {text}")
 
             if resp.status != 200:
-                await call.message.answer("❌ Ошибка платежного сервера")
+                await call.message.answer(f"❌ Ошибка Platega: {resp.status}\n{text}")
                 await call.answer()
                 return
 
-            data = await resp.json()
-            logger.info(f"PLATEGA RESPONSE: {data}")
+            try:
+                data = json.loads(text)
+            except Exception:
+                await call.message.answer("❌ Platega вернул не JSON")
+                return
 
         # ================= LINK =================
         pay_url = None
@@ -337,17 +344,16 @@ async def card_confirm(call: CallbackQuery):
                 or data.get("payment_url")
             )
 
-            if not pay_url and "result" in data:
+            if not pay_url and isinstance(data.get("result"), dict):
                 result = data["result"]
-                if isinstance(result, dict):
-                    pay_url = (
-                        result.get("redirect")
-                        or result.get("url")
-                        or result.get("payment_url")
-                    )
+                pay_url = (
+                    result.get("redirect")
+                    or result.get("url")
+                    or result.get("payment_url")
+                )
 
         if not pay_url:
-            await call.message.answer("❌ Платёж создан, но ссылка не найдена")
+            await call.message.answer(f"❌ Нет ссылки оплаты\nОтвет: {data}")
             await call.answer()
             return
 
@@ -364,12 +370,12 @@ async def card_confirm(call: CallbackQuery):
         ])
 
         await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        await call.answer()
 
     except Exception as e:
         logger.exception(f"PLATEGA ERROR: {e}")
         await call.message.answer("❌ Ошибка подключения к платёжной системе")
-
-    await call.answer()
+        await call.answer()
 # --- STARS ---
 @router.callback_query(F.data == "stars")
 async def stars_menu(call: CallbackQuery):
