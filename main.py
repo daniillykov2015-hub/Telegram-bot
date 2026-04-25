@@ -332,9 +332,8 @@ async def card_confirm(call: CallbackQuery):
         await call.message.answer("❌ Ошибка подключения к платёжной системе")
 
     await call.answer()
+            pay_url = None 
         # ================= LINK =================
-            pay_url = None
-
         if isinstance(data, dict):
             pay_url = (
                 data.get("redirect")
