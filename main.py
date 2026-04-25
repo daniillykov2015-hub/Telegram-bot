@@ -45,6 +45,7 @@ router = Router()
 dp.include_router(router)
 
 http_session = None
+tasks = []
 # ================== TEXTS ==================
 MAIN_TEXT = (
     "👋 Привет, я Ева и это мой закрытый канал\n\n"
@@ -770,17 +771,25 @@ async def main():
     http_session = aiohttp.ClientSession()
     await init_db()
 
-    # создаём задачи НО правильно
     loop = asyncio.get_running_loop()
 
-    loop.create_task(crypto_checker())
-    loop.create_task(card_checker())
-    loop.create_task(check_subscriptions())
+    tasks.append(loop.create_task(crypto_checker()))
+    tasks.append(loop.create_task(card_checker()))
+    tasks.append(loop.create_task(check_subscriptions()))
 
     try:
         await dp.start_polling(bot)
+
     finally:
-        await http_session.close()
+        # 🔥 ВАЖНО: гасим фоновые задачи
+        for task in tasks:
+            task.cancel()
+
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+        # закрываем HTTP
+        if http_session and not http_session.closed:
+            await http_session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
