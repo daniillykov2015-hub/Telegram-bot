@@ -252,12 +252,16 @@ def main_menu_kb():
         [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
     ])
 # ================== HANDLERS ==================
-from aiogram import F, bot
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice
+from aiogram import F, Router
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice, PreCheckoutQuery
+
+router = Router()
+
+# ================== ⭐ TELEGRAM STARS PAYMENT ==================
 
 @router.callback_query(F.data == "stars")
 async def stars_menu(call: CallbackQuery):
-    # Формируем меню выбора тарифа (как на твоем третьем фото)
+    """Выбор тарифа (как на твоем 3-м фото)"""
     buttons = []
     for k, p in PLANS.items():
         buttons.append([InlineKeyboardButton(
@@ -268,25 +272,34 @@ async def stars_menu(call: CallbackQuery):
     buttons.append([InlineKeyboardButton(text="⬅ Назад", callback_data="back")])
     kb = InlineKeyboardMarkup(inline_keyboard=buttons)
 
-    await call.message.edit_text("⭐ <b>Выберите период подписки Stars:</b>", reply_markup=kb, parse_mode="HTML")
+    await call.message.edit_text(
+        "⭐ <b>Выберите период подписки Stars:</b>", 
+        reply_markup=kb, 
+        parse_mode="HTML"
+    )
     await call.answer()
+
 
 @router.callback_query(F.data.startswith("stars_plan_info:"))
 async def stars_plan_info(call: CallbackQuery):
+    """Детали платежа и кнопка оплаты (как на твоем 1-м и 2-м фото)"""
     plan_id = call.data.split(":")[1]
     plan = PLANS.get(plan_id)
 
-    # Генерируем прямую ссылку на оплату Stars
+    if not plan:
+        await call.answer("❌ Тариф не найден", show_alert=True)
+        return
+
+    # Создаем прямую ссылку на инвойс для мгновенного открытия окна оплаты
     invoice_link = await call.bot.create_invoice_link(
         title=f"Тариф: {plan['name']}",
-        description=f"Срок: {plan.get('duration', '1 месяц')}\nСпособ оплаты: Telegram Stars",
+        description=f"Доступ в канал на {plan.get('duration', '1 месяц')}",
         payload=f"stars_{plan_id}",
-        provider_token="", # Пусто для Stars
+        provider_token="", # Для Stars всегда пусто
         currency="XTR",
         prices=[LabeledPrice(label=plan["name"], amount=plan["stars"])]
     )
 
-    # Текст сообщения как на твоем первом фото
     text = (
         f"Проверьте детали платежа:\n\n"
         f"📦 Тариф: <b>{plan['name']}</b>\n"
@@ -296,13 +309,20 @@ async def stars_plan_info(call: CallbackQuery):
         f"Нажмите 💸 <b>Оплатить</b>, чтобы перейти к оплате."
     )
 
+    # Кнопка с url автоматически получит стрелочку «↗»
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💸 Оплатить", url=invoice_link)], # Ссылка дает стрелочку
+        [InlineKeyboardButton(text="💸 Оплатить", url=invoice_link)],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
     ])
 
     await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     await call.answer()
+
+
+@router.pre_checkout_query()
+async def pre_checkout_handler(pre_checkout_query: PreCheckoutQuery):
+    """Обязательный обработчик подтверждения платежа (серверный аппрув)"""
+    await pre_checkout_query.answer(ok=True)
 
 @router.callback_query(F.data == "pay_card")
 async def pay_card(call: CallbackQuery):
