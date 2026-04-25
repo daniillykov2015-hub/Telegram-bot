@@ -270,48 +270,36 @@ async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=main_menu_kb())
     await call.answer()
 # --- КАРТА / СБП (ПЛАТЕГА) ---
-@router.callback_query(F.data == "pay_card")
-async def card_menu(call: CallbackQuery):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"{p['name']} — {p['rub']}₽", callback_data=f"card_confirm:{k}")]
-        for k, p in PLANS.items()
-    ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
-    await call.message.edit_text("💳 Выберите период подписки (Оплата картой или СБП):", reply_markup=kb)
-    await call.answer()
-
 @router.callback_query(F.data.startswith("card_confirm:"))
 async def card_confirm(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
     plan = PLANS[plan_id]
 
-try:
-    async with http_session.post(
-        "https://app.platega.io/transaction/process",
-        headers={
-            "X-MerchantId": MERCHANT_ID,
-            "X-Secret": PAYMENT_TOKEN,
-            "Content-Type": "application/json"
-        },
-        json={
-            "paymentDetails": {
-                "amount": plan["rub"],
-                "currency": "RUB"
+    try:
+        async with http_session.post(
+            "https://app.platega.io/transaction/process",
+            headers={
+                "X-MerchantId": MERCHANT_ID,
+                "X-Secret": PAYMENT_TOKEN,
+                "Content-Type": "application/json"
             },
-            "description": f"Подписка {plan['name']}",
-            "payload": f"user_{call.from_user.id}_{plan_id}"
-        }
-    ) as resp:
-        data = await resp.json()
+            json={
+                "paymentDetails": {
+                    "amount": plan["rub"],
+                    "currency": "RUB"
+                },
+                "description": f"Подписка {plan['name']}",
+                "payload": f"user_{call.from_user.id}_{plan_id}"
+            }
+        ) as resp:
+            data = await resp.json()
 
-        pay_url = data.get("redirect") or data.get("url") or data.get("payment_url")
+            pay_url = data.get("redirect") or data.get("url") or data.get("payment_url")
 
-        if not pay_url:
-            await call.message.answer("❌ Ошибка создания платежа")
-            return
+            if not pay_url:
+                await call.message.answer("❌ Ошибка создания платежа")
+                return
 
-except Exception as e:
-    logging.error(f"Platega error: {e}")
-    await call.message.answer("❌ Ошибка подключения к платёжной системе")
         text = (
             "<b>Проверьте детали платежа:</b>\n\n"
             f"📦 Тариф: {plan['name']}\n"
@@ -332,7 +320,6 @@ except Exception as e:
         await call.message.answer("❌ Ошибка подключения к платёжной системе")
 
     await call.answer()
-
 # --- STARS ---
 @router.callback_query(F.data == "stars")
 async def stars_menu(call: CallbackQuery):
