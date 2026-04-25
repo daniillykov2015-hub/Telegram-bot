@@ -279,25 +279,7 @@ async def card_menu(call: CallbackQuery):
     await call.message.edit_text("💳 Выберите период подписки (Оплата картой или СБП):", reply_markup=kb)
     await call.answer()
 
-@router.callback_query(F.data.startswith("card_confirm:"))
-async def card_confirm(call: CallbackQuery):
-    plan_id = call.data.split(":")[1]
-    plan = PLANS[plan_id]
-    
-    # Сумма указывается в копейках (рубли * 100)
-    prices = [LabeledPrice(label=f"Подписка {plan['name']}", amount=plan['rub'] * 100)]
-    
-    await bot.send_invoice(
-        chat_id=call.from_user.id,
-        title="Оплата подписки",
-        description=f"Доступ в закрытый канал на {plan['name']}",
-        payload=f"card_{plan_id}",
-        provider_token=PAYMENT_TOKEN,
-        currency="RUB",
-        prices=prices,
-        start_parameter="sub_pay"
-    )
-    await call.answer()
+
 # --- STARS ---
 @router.callback_query(F.data == "stars")
 async def stars_menu(call: CallbackQuery):
