@@ -149,7 +149,7 @@ PLANS = {
         "name": "1 день", 
         "days": 1,
         "rub": 10,    
-        "stars": 50,  
+        "stars": 10,  
         "crypto": 9    
     },
     "7": {
@@ -326,20 +326,33 @@ async def start(message: Message):
 async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=main_menu_kb())
 
-# Команда /sub в меню
-@router.message(F.text == "/sub")
-async def cmd_sub(message: Message):
-    # Просто вызываем ту же логику, что и у кнопки "Моя подписка"
-    # Но так как это сообщение, а не нажатие кнопки, создаем временный объект
-    from aiogram.types import CallbackQuery
-    await my_subscription(message) # Бот ответит тем же текстом
+# 1. ОБЯЗАТЕЛЬНО: Подтверждение готовности к оплате
+@router.pre_checkout_query()
+async def process_pre_checkout_query(pre_checkout_query: PreCheckoutQuery):
+    try:
+        await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+    except Exception as e:
+        logger.error(f"Ошибка в pre_checkout: {e}")
 
-# Команда /ref в меню
-@router.message(F.text == "/ref")
-async def cmd_ref_menu(message: Message):
-    # Вызываем функцию рефералки, которую ты уже писал
-    await ref(message)
-
+# 2. ОБЯЗАТЕЛЬНО: Что делать, когда звезды УСПЕШНО списаны
+@router.message(F.successful_payment)
+async def process_successful_payment(message: Message):
+    if message.successful_payment:
+        # Здесь мы понимаем, какой тариф купили. 
+        # Обычно это передается в payload (например "stars_plan_1")
+        payload = message.successful_payment.invoice_payload
+        plan_id = payload.split("_")[-1] # Вытаскиваем ID тарифа
+        
+        days = PLANS[plan_id]["days"] # Берем количество дней из твоего словаря PLANS
+        
+        # Начисляем дни пользователю
+        await extend_user(message.from_user.id, days)
+        
+        await message.answer(
+            f"✅ <b>Оплата прошла успешно!</b>\n"
+            f"Вам начислено {days} дн. доступа.\n\n"
+            "Используйте команду /start, чтобы обновить меню."
+        )
 # Команда /help в меню
 @router.message(F.text == "/help")
 async def cmd_help(message: Message):
@@ -608,7 +621,7 @@ async def platega_checker():
                         # Получаем статус (обычно 'success' или 'paid')
                         status = data.get("status") or data.get("result", {}).get("status")
 
-                        if status == "success":
+                        if status and status.lower() == "success":
                             # 3. Если оплачено — начисляем дни!
                             days = PLANS[p_id_plan]["days"]
                             await extend_user(u_id, days)
