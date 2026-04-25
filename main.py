@@ -301,9 +301,9 @@ async def card_confirm(call: CallbackQuery):
                 "payload": f"user_{call.from_user.id}_{plan_id}"
             }
         ) as resp:
-            data = await resp.json()
-
-        pay_url = data.get("redirect")
+        data = await resp.json()
+logging.info(f"PLATEGA RESPONSE: {data}")
+pay_url = data.get("redirect") or data.get("url") or data.get("payment_url")
 
         if not pay_url:
             await call.message.answer("❌ Ошибка создания платежа")
