@@ -299,12 +299,15 @@ async def card_confirm(call: CallbackQuery):
     try:
         logger.info(f"Platega payment | user={call.from_user.id} plan={plan_id}")
 
-        payload = {
-            "amount": float(plan["rub"]),
-            "currency": "RUB",
-            "order_id": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}",
-            "description": f"Подписка {plan['name']}",
-            "paymentMethod": "card"
+payload = {
+    "command": "create",
+    "paymentDetails": {
+        "amount": float(plan["rub"]),
+        "currency": "RUB"
+    },
+    "order_id": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}",
+    "description": f"Подписка {plan['name']}"
+}card"
         }
 
         logger.info(f"PLATEGA REQUEST: {payload}")
