@@ -440,15 +440,7 @@ async with http_session.post(
         await call.answer()
         return
 
-text = await resp.text()
-logger.info(f"PLATEGA RAW: {text}")
-
-try:
-    data = json.loads(text)
-except Exception:
-    await call.message.answer("❌ Platega вернул не JSON")
-    await call.answer()
-    return
+# дальше твой код получения pay_url оставь как был
 
         # --- получаем ссылку ---
         pay_url = (
