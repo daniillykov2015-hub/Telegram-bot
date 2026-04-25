@@ -279,6 +279,56 @@ async def card_menu(call: CallbackQuery):
     await call.message.edit_text("💳 Выберите период подписки (Оплата картой или СБП):", reply_markup=kb)
     await call.answer()
 
+@router.callback_query(F.data.startswith("card_confirm:"))
+async def card_confirm(call: CallbackQuery):
+    plan_id = call.data.split(":")[1]
+    plan = PLANS[plan_id]
+
+    try:
+        async with http_session.post(
+            "https://app.platega.io/v2/transaction/process",
+            headers={
+                "X-MerchantId": MERCHANT_ID,
+                "X-Secret": PAYMENT_TOKEN,
+                "Content-Type": "application/json"
+            },
+            json={
+                "paymentDetails": {
+                    "amount": plan["rub"],
+                    "currency": "RUB"
+                },
+                "description": f"Подписка {plan['name']}",
+                "payload": f"user_{call.from_user.id}_{plan_id}"
+            }
+        ) as resp:
+            data = await resp.json()
+
+        pay_url = data.get("redirect")
+
+        if not pay_url:
+            await call.message.answer("❌ Ошибка создания платежа")
+            return
+
+        text = (
+            "<b>Проверьте детали платежа:</b>\n\n"
+            f"📦 Тариф: {plan['name']}\n"
+            f"💳 Способ оплаты: Карта / СБП\n"
+            f"💰 К оплате: {plan['rub']} ₽\n\n"
+            "Нажмите 💸 Оплатить, чтобы перейти к оплате."
+        )
+
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💸 Оплатить", url=pay_url)],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="pay_card")]
+        ])
+
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+    except Exception as e:
+        logging.error(f"Platega error: {e}")
+        await call.message.answer("❌ Ошибка подключения к платёжной системе")
+
+    await call.answer()
 
 # --- STARS ---
 @router.callback_query(F.data == "stars")
