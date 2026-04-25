@@ -177,28 +177,61 @@ async def init_db():
             referrer INTEGER,
             ref_count INTEGER DEFAULT 0,
             bonus_days INTEGER DEFAULT 0
-        )
-        """)
-
+        )""")
         await db.execute("""
         CREATE TABLE IF NOT EXISTS crypto_invoices (
             invoice_id TEXT PRIMARY KEY,
             user_id INTEGER,
             plan_id TEXT,
             status TEXT DEFAULT 'pending'
-        )
-        """)
+        )""")
+        await db.commit()
 
-        # 💳 SBP / CARD (Platega)
+async def get_user(user_id):
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("SELECT user_id, expiry, referrer, ref_count, bonus_days FROM users WHERE user_id=?", (user_id,)) as cur:
+            return await cur.fetchone()
+
+async def extend_user(user_id, days, is_bonus=False):
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("SELECT expiry, referrer FROM users WHERE user_id=?", (user_id,)) as cur:
+            row = await cur.fetchone()
+        
+        if row and row[0]:
+            current = datetime.fromisoformat(row[0]).replace(tzinfo=timezone.utc)
+            base = max(datetime.now(timezone.utc), current)
+        else:
+            base = datetime.now(timezone.utc)
+
+        new_expiry = base + timedelta(days=days)
         await db.execute("""
-        CREATE TABLE IF NOT EXISTS card_invoices (
-            payload TEXT PRIMARY KEY,
-            user_id INTEGER,
-            plan_id TEXT,
-            status TEXT DEFAULT 'pending'
-        )
-        """)
-
+        INSERT INTO users (user_id, expiry) VALUES (?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET expiry=excluded.expiry
+        """, (user_id, new_expiry.isoformat()))
+        
+        # Если это обычная покупка (не бонус) и у пользователя есть пригласитель
+        if not is_bonus and row and row[1]:
+            ref_id = row[1]
+            # Проверяем, есть ли у пригласителя активная подписка (условие начисления бонуса)
+            async with db.execute("SELECT expiry FROM users WHERE user_id=?", (ref_id,)) as cur:
+                ref_row = await cur.fetchone()
+                if ref_row and ref_row[0]:
+                    ref_expiry = datetime.fromisoformat(ref_row[0]).replace(tzinfo=timezone.utc)
+                    if ref_expiry > datetime.now(timezone.utc):
+                        # Начисляем 7 дней пригласителю
+                        await db.execute("""
+                            UPDATE users 
+                            SET ref_count = ref_count + 1, 
+                                bonus_days = bonus_days + 7 
+                            WHERE user_id = ?
+                        """, (ref_id,))
+                        await db.commit()
+                        # Продлеваем срок пригласителю
+                        await extend_user(ref_id, 7, is_bonus=True)
+                        try:
+                            await bot.send_message(ref_id, "💎 <b>Бонус начислен!</b> Ваш друг оплатил подписку, вам добавлено <b>7 дней</b> доступа!")
+                        except:
+                            pass
         await db.commit()
 
 # ================== KEYBOARDS ==================
@@ -321,25 +354,22 @@ async def card_confirm(call: CallbackQuery):
     try:
         logger.info(f"Platega payment | user={call.from_user.id} plan={plan_id}")
 
+        # Формируем payload согласно документации v2
         payload = {
             "paymentDetails": {
                 "amount": float(plan["rub"]),
                 "currency": "RUB"
             },
+            # Обязательный формат для описания (без пробелов после двоеточия для ID)
             "description": f"TgId:{call.from_user.id} UserId:{call.from_user.id} | {plan['name']}",
+            # Ваш внутренний ID заказа для отслеживания
             "payload": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}"
         }
 
-        # 💳 сохраняем платеж (ВАЖНО: внутри try)
-        async with aiosqlite.connect(DB_NAME) as db:
-            await db.execute(
-                "INSERT OR REPLACE INTO card_invoices (payload, user_id, plan_id, status) VALUES (?, ?, ?, ?)",
-                (payload["payload"], call.from_user.id, plan_id, "pending")
-            )
-            await db.commit()
+        logger.info(f"PLATEGA REQUEST: {payload}")
 
         async with http_session.post(
-            "https://app.platega.io/v2/transaction/process",
+            "https://app.platega.io/v2/transaction/process", # Добавлен v2
             headers={
                 "X-MerchantId": MERCHANT_ID,
                 "X-Secret": PAYMENT_TOKEN,
@@ -350,43 +380,44 @@ async def card_confirm(call: CallbackQuery):
 
             text = await resp.text()
 
+            logger.info(f"PLATEGA STATUS: {resp.status}")
+            logger.info(f"PLATEGA RAW RESPONSE: {text}")
+
             if resp.status != 200:
                 await call.message.answer(f"❌ Ошибка Platega {resp.status}\n{text}")
                 await call.answer()
                 return
 
-            data = await resp.json()
+            try:
+                data = await resp.json()
+            except Exception:
+                await call.message.answer("❌ Platega вернул не JSON")
+                await call.answer()
+                return
 
+        # ================= LINK =================
         pay_url = None
 
         if isinstance(data, dict):
-            pay_url = data.get("url") or data.get("redirect") or data.get("payment_url")
-
+            # Проверяем все возможные ключи ссылки в ответе
+            pay_url = (
+                data.get("url") 
+                or data.get("redirect") 
+                or data.get("payment_url")
+            )
+            
+            # Если ссылка вложена в объект result
             result = data.get("result")
             if not pay_url and isinstance(result, dict):
-                pay_url = result.get("url") or result.get("redirect") or result.get("payment_url")
+                pay_url = (
+                    result.get("url") 
+                    or result.get("redirect") 
+                    or result.get("payment_url")
+                )
 
         if not pay_url:
-            await call.message.answer("❌ Не удалось получить ссылку оплаты")
+            await call.message.answer(f"❌ Ссылка оплаты не найдена\n{text}")
             await call.answer()
-            return
-
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💸 Оплатить", url=pay_url)],
-            [InlineKeyboardButton(text="⬅ Назад", callback_data="pay_card")]
-        ])
-
-        await call.message.edit_text(
-            f"💳 <b>{plan['name']}</b>\n💰 {plan['rub']} ₽",
-            reply_markup=kb,
-            parse_mode="HTML"
-        )
-
-    except Exception as e:
-        logger.exception(e)
-        await call.message.answer("❌ Ошибка оплаты")
-
-    await call.answer()
             return
 
         text_msg = (
