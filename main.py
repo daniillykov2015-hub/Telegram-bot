@@ -325,6 +325,25 @@ async def start(message: Message):
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=main_menu_kb())
+
+# Команда /sub в меню
+@router.message(F.text == "/sub")
+async def cmd_sub(message: Message):
+    # Просто вызываем ту же логику, что и у кнопки "Моя подписка"
+    # Но так как это сообщение, а не нажатие кнопки, создаем временный объект
+    from aiogram.types import CallbackQuery
+    await my_subscription(message) # Бот ответит тем же текстом
+
+# Команда /ref в меню
+@router.message(F.text == "/ref")
+async def cmd_ref_menu(message: Message):
+    # Вызываем функцию рефералки, которую ты уже писал
+    await ref(message)
+
+# Команда /help в меню
+@router.message(F.text == "/help")
+async def cmd_help(message: Message):
+    await message.answer("💬 <b>Поддержка</b>\n\nЕсли у вас возникли вопросы по оплате или доступу, пишите: @mistybibi", parse_mode="HTML")
 # --- PLATEGA ---
 @router.callback_query(F.data.startswith("card_confirm:"))
 async def card_confirm(call: CallbackQuery):
