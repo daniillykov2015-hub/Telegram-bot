@@ -374,15 +374,7 @@ async def card_confirm(call: CallbackQuery):
             # Ваш внутренний ID заказа для отслеживания
             "payload": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}"
         }
-payload_str = payload["payload"]
 
-async with aiosqlite.connect(DB_NAME) as db:
-    await db.execute("""
-        INSERT OR IGNORE INTO card_invoices (payload, user_id, plan_id, status)
-        VALUES (?, ?, ?, 'pending')
-    """, (payload_str, call.from_user.id, plan_id))
-    await db.commit()
-        
         logger.info(f"PLATEGA REQUEST: {payload}")
 
         async with http_session.post(
