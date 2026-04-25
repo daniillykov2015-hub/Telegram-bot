@@ -332,6 +332,18 @@ async def card_confirm(call: CallbackQuery):
             # Ваш внутренний ID заказа для отслеживания
             "payload": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}"
         }
+        # 💳 сохраняем платеж в БД (SBP / CARD)
+async with aiosqlite.connect(DB_NAME) as db:
+    await db.execute(
+        "INSERT OR REPLACE INTO card_invoices (payload, user_id, plan_id, status) VALUES (?, ?, ?, ?)",
+        (
+            payload["payload"],
+            call.from_user.id,
+            plan_id,
+            "pending"
+        )
+    )
+    await db.commit()
 
         logger.info(f"PLATEGA REQUEST: {payload}")
 
