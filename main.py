@@ -534,6 +534,57 @@ async def join(req: ChatJoinRequest):
             return
     await req.decline()
 
+async def platega_checker():
+    while True:
+        try:
+            # 1. Заглядываем в базу и ищем счета со статусом 'pending' (ожидание)
+            async with aiosqlite.connect(DB_NAME) as db:
+                async with db.execute(
+                    "SELECT payment_id, user_id, plan_id FROM platega_invoices WHERE status='pending'"
+                ) as cur:
+                    invoices = await cur.fetchall()
+
+            # 2. Перебираем каждый найденный счет
+            for p_id, u_id, p_id_plan in invoices:
+                # Спрашиваем у Platega статус этой конкретной транзакции
+                async with http_session.get(
+                    f"https://app.platega.io/v2/transaction/{p_id}",
+                    headers={
+                        "X-MerchantId": MERCHANT_ID,
+                        "X-Secret": PAYMENT_TOKEN
+                    }
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        # Получаем статус (обычно 'success' или 'paid')
+                        status = data.get("status") or data.get("result", {}).get("status")
+
+                        if status == "success":
+                            # 3. Если оплачено — начисляем дни!
+                            days = PLANS[p_id_plan]["days"]
+                            await extend_user(u_id, days)
+                            
+                            # Обновляем статус в базе, чтобы больше не проверять этот счет
+                            async with aiosqlite.connect(DB_NAME) as db:
+                                await db.execute(
+                                    "UPDATE platega_invoices SET status='paid' WHERE payment_id=?", 
+                                    (p_id,)
+                                )
+                                await db.commit()
+
+                            # Радуем пользователя сообщением
+                            try:
+                                await bot.send_message(
+                                    u_id, 
+                                    f"✅ <b>Оплата получена!</b>\nВам начислено {days} дн. доступа. Приятного пользования!"
+                                )
+                            except:
+                                pass
+        except Exception as e:
+            logging.error(f"Platega checker error: {e}")
+        
+        # Ждем 30 секунд перед следующей проверкой
+        await asyncio.sleep(30)
 # --- BACKGROUND TASKS ---
 async def crypto_checker():
     while True:
@@ -591,6 +642,7 @@ async def main():
     await init_db()
     
     asyncio.create_task(crypto_checker())
+    asyncio.create_task(platega_checker())
     asyncio.create_task(check_subscriptions())
     
     await dp.start_polling(bot)
