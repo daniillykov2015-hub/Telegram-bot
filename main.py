@@ -590,11 +590,17 @@ async def success(message: Message):
 @router.chat_join_request()
 async def join(req: ChatJoinRequest):
     user = await get_user(req.from_user.id)
-    if user and user[1]:
-        if datetime.fromisoformat(user[1]).replace(tzinfo=timezone.utc) > datetime.now(timezone.utc):
-            await req.approve()
-            return
-    await req.decline()
+
+    if not user or not user[1]:
+        await req.decline()
+        return
+
+    expiry = datetime.fromisoformat(user[1]).replace(tzinfo=timezone.utc)
+
+    if expiry > datetime.now(timezone.utc):
+        await req.approve()
+    else:
+        await req.decline()
 
 # --- BACKGROUND TASKS ---
 async def crypto_checker():
