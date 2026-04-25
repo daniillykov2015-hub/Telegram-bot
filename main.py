@@ -601,8 +601,8 @@ async def join(req: ChatJoinRequest):
         await req.decline()
 
 # --- BACKGROUND TASKS ---
-    
-    async def card_checker():
+
+async def card_checker():
     processed = set()
 
     while True:
@@ -614,7 +614,7 @@ async def join(req: ChatJoinRequest):
                     invoices = await cur.fetchall()
 
             if not invoices:
-                await asyncio.sleep(1)
+                await asyncio.sleep(2)
                 continue
 
             for payload, user_id, plan_id in invoices:
