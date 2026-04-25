@@ -261,9 +261,8 @@ async def stars_confirm(call: CallbackQuery):
         await call.answer("Тариф не найден")
         return
 
-    # 1. Сначала создаем инвойс, чтобы получить ссылку на оплату
-    # (Telegram позволяет генерировать прямые ссылки на инвойсы)
-    invoice_link = await bot.create_invoice_link(
+    # 1. Генерируем ссылку на оплату (именно она даст стрелочку)
+    invoice_link = await call.bot.create_invoice_link(
         title=f"Подписка: {plan['name']}",
         description=f"Доступ в закрытый канал на {plan['name']}",
         prices=[LabeledPrice(label="Stars", amount=plan['stars'])],
@@ -272,7 +271,7 @@ async def stars_confirm(call: CallbackQuery):
         provider_token=""
     )
 
-    # 2. Формируем текст в точности как на скриншоте
+    # 2. Текст сообщения (копия твоего дизайна)
     text = (
         "<b>Проверьте детали платежа:</b>\n\n"
         f"📦 Тариф: {plan['name']}\n"
@@ -282,14 +281,13 @@ async def stars_confirm(call: CallbackQuery):
         "Нажмите 💸 Оплатить, чтобы перейти к оплате."
     )
 
-    # 3. Создаем клавиатуру со СТРЕЛОЧКОЙ (через url)
+    # 3. Клавиатура с URL-кнопкой (появится та самая стрелочка)
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💸 Оплатить", url=invoice_link)], # Именно url дает стрелочку в углу
+        [InlineKeyboardButton(text="💸 Оплатить", url=invoice_link)],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
     ])
 
-    # 4. Редактируем текущее сообщение (как в Crypto/Картах)
-    # Это позволит избежать прыгающих сообщений и удалений
+    # 4. Редактируем текущее сообщение
     await call.message.edit_text(
         text=text,
         reply_markup=kb,
