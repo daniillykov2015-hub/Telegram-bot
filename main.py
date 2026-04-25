@@ -283,7 +283,7 @@ async def card_confirm(call: CallbackQuery):
     try:
         logger.info(f"Platega payment | user={call.from_user.id} plan={plan_id}")
 
-        async with http_session.post(
+async with http_session.post(
     "https://app.platega.io/transaction/process",
     headers={
         "X-MerchantId": MERCHANT_ID,
@@ -298,11 +298,11 @@ async def card_confirm(call: CallbackQuery):
     }
 ) as resp:
 
-    # 🔥 ВОТ ЭТО ДОБАВЛЯЕШЬ СРАЗУ ПОСЛЕ ОТВЕТА
+    # 🔴 ВАЖНО: ВСЁ ДОЛЖНО БЫТЬ ВНУТРИ ОТСТУПА
+
     if resp.status != 200:
-        text = await resp.text()
-        logger.error(f"PLATEGA HTTP ERROR {resp.status}: {text}")
-        await call.message.answer("❌ Ошибка платежной системы (HTTP)")
+        logger.error(f"HTTP ERROR: {resp.status}")
+        await call.message.answer("❌ Ошибка платежного сервера")
         return
 
     data = await resp.json()
