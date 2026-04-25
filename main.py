@@ -23,6 +23,7 @@ from aiogram.exceptions import TelegramBadRequest
 
 # ================== CONFIG ==================
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
@@ -270,7 +271,7 @@ async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=main_menu_kb())
     await call.answer()
 # --- КАРТА / СБП (ПЛАТЕГА) ---
-@router.callback_query(F.data.startswith("card_confirm_"))
+@router.callback_query(F.data.startswith("card_confirm:"))
 async def card_confirm(call: CallbackQuery):
     plan_id = call.data.split("_")[2]
     plan = PLANS.get(plan_id)
@@ -283,22 +284,29 @@ async def card_confirm(call: CallbackQuery):
         logger.info(f"Platega payment | user={call.from_user.id} plan={plan_id}")
 
         async with http_session.post(
-            "https://app.platega.io/transaction/process",
-            headers={
-                "X-MerchantId": MERCHANT_ID,
-                "X-Secret": PAYMENT_TOKEN,
-                "Content-Type": "application/json"
-            },
-            json={
-                "amount": plan["rub"],
-                "currency": "RUB",
-                "order_id": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}",
-                "description": f"Подписка {plan['name']}"
-            }
-        ) as resp:
+    "https://app.platega.io/transaction/process",
+    headers={
+        "X-MerchantId": MERCHANT_ID,
+        "X-Secret": PAYMENT_TOKEN,
+        "Content-Type": "application/json"
+    },
+    json={
+        "amount": plan["rub"],
+        "currency": "RUB",
+        "order_id": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}",
+        "description": f"Подписка {plan['name']}"
+    }
+) as resp:
 
-            data = await resp.json()
-            logger.info(f"PLATEGA RESPONSE: {data}")
+    # 🔥 ВОТ ЭТО ДОБАВЛЯЕШЬ СРАЗУ ПОСЛЕ ОТВЕТА
+    if resp.status != 200:
+        text = await resp.text()
+        logger.error(f"PLATEGA HTTP ERROR {resp.status}: {text}")
+        await call.message.answer("❌ Ошибка платежной системы (HTTP)")
+        return
+
+    data = await resp.json()
+    logger.info(f"PLATEGA RESPONSE: {data}")
 
         # ================== LINK PARSER ==================
         pay_url = None
