@@ -178,6 +178,7 @@ async def init_db():
             ref_count INTEGER DEFAULT 0,
             bonus_days INTEGER DEFAULT 0
         )""")
+        
         await db.execute("""
         CREATE TABLE IF NOT EXISTS crypto_invoices (
             invoice_id TEXT PRIMARY KEY,
@@ -185,8 +186,17 @@ async def init_db():
             plan_id TEXT,
             status TEXT DEFAULT 'pending'
         )""")
-        await db.commit()
 
+        # --- ТАБЛИЦА ДЛЯ PLATEGA ---
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS platega_invoices (
+            payment_id TEXT PRIMARY KEY,
+            user_id INTEGER,
+            plan_id TEXT,
+            status TEXT DEFAULT 'pending'
+        )""")
+
+        await db.commit()
 async def get_user(user_id):
     async with aiosqlite.connect(DB_NAME) as db:
         async with db.execute("SELECT user_id, expiry, referrer, ref_count, bonus_days FROM users WHERE user_id=?", (user_id,)) as cur:
