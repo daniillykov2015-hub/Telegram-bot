@@ -252,52 +252,22 @@ def main_menu_kb():
         [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
     ])
 # ================== HANDLERS ==================
-# ================== ⭐ STARS ==================
-
 @router.callback_query(F.data == "stars")
 async def stars_menu(call: CallbackQuery):
+    # Вместо текстового меню сразу выводим список тарифов. 
+    # Но если ты хочешь, чтобы при клике на "Stars" сразу вылетал счет, 
+    # нужно выбрать один конкретный plan_id.
+    
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
-            text=f"{p['name']} — {p['stars']}⭐",
-            callback_data=f"stars_plan:{k}"
+            text=f"Выбрать {p['name']} — {p['stars']}⭐",
+            callback_data=f"stars_pay:{k}"
         )]
         for k, p in PLANS.items()
-    ] + [
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
-    ])
+    ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
 
     await call.message.edit_text(
-        "⭐ <b>Оплата Stars</b>\n\nВыбери тариф:",
-        reply_markup=kb,
-        parse_mode="HTML"
-    )
-    await call.answer()
-
-
-@router.callback_query(F.data.startswith("stars_plan:"))
-async def stars_plan(call: CallbackQuery):
-    plan_id = call.data.split(":")[1]
-    plan = PLANS.get(plan_id)
-
-    if not plan:
-        await call.answer("❌ Тариф не найден", show_alert=True)
-        return
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text="💸 Оплатить",
-            callback_data=f"stars_pay:{plan_id}"
-        )],
-        [InlineKeyboardButton(
-            text="⬅ Назад",
-            callback_data="stars"
-        )]
-    ])
-
-    await call.message.edit_text(
-        f"⭐ <b>{plan['name']}</b>\n\n"
-        f"💰 Цена: {plan['stars']}⭐\n\n"
-        "Нажми «Оплатить» для перехода к оплате",
+        "⭐ <b>Выберите тариф для оплаты:</b>",
         reply_markup=kb,
         parse_mode="HTML"
     )
@@ -313,28 +283,32 @@ async def stars_pay(call: CallbackQuery):
         await call.answer("❌ Тариф не найден", show_alert=True)
         return
 
+    # Удаляем предыдущее сообщение-меню, чтобы чат был чистым
+    await call.message.delete()
+
+    # Отправляем инвойс. Именно он создаст "пузырь" с кнопкой как на фото.
     try:
         await bot.send_invoice(
             chat_id=call.from_user.id,
-            title="⭐ Подписка",
-            description=f"{plan['name']} доступ к закрытому каналу",
+            title=f"Тариф: {plan['name']}",
+            description=f"Доступ в канал на {plan.get('duration', '1 мес.')}",
             payload=f"stars_{plan_id}",
-            provider_token="",
+            provider_token="",  # Для Stars всегда пусто
             currency="XTR",
             prices=[
                 LabeledPrice(
-                    label=plan["name"],
+                    label=f"Оплата {plan['name']}", 
                     amount=plan["stars"]
                 )
-            ]
+            ],
+            # Эта настройка сделает кнопку оплаты основной
+            start_parameter="pay_star_subscription"
         )
-
-        await call.answer()
-
     except Exception as e:
-        logger.exception(f"Stars payment error: {e}")
-        await call.message.answer("❌ Ошибка открытия оплаты Stars")
-        await call.answer()
+        logger.exception(f"Error sending invoice: {e}")
+        await call.message.answer("❌ Произошла ошибка при формировании счета.")
+    
+    await call.answer()
 
 @router.callback_query(F.data == "pay_card")
 async def pay_card(call: CallbackQuery):
