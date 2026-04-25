@@ -1,5 +1,3 @@
-Готовый: 
-
 import asyncio
 import logging
 import os
@@ -660,13 +658,11 @@ async def card_checker():
                     ) as resp:
                         data = await resp.json()
 
+                    status = (
+                        data.get("status")
+                        or data.get("result", {}).get("status")
+                    )
 
-                    status = str(
-    data.get("status")
-    or data.get("result", {}).get("status")
-    or data.get("result", {}).get("state")
-    or ""
-).lower()
                     if status in ["paid", "success", "completed"]:
                         days = PLANS[plan_id]["days"]
 
