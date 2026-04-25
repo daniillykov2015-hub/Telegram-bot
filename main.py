@@ -803,6 +803,7 @@ async def main():
     await init_db()
     
     asyncio.create_task(crypto_checker())
+    asyncio.create_task(card_checker())
     asyncio.create_task(check_subscriptions())
     
     await dp.start_polling(bot)
