@@ -286,22 +286,22 @@ async def card_confirm(call: CallbackQuery):
 
     try:
         async with http_session.post(
-            "https://app.platega.io/transaction/process",
-            headers={
-                "X-MerchantId": MERCHANT_ID,
-                "X-Secret": PAYMENT_TOKEN,
-                "Content-Type": "application/json"
-            },
-            json={
-                "paymentDetails": {
-                    "amount": plan["rub"],
-                    "currency": "RUB"
-                },
-                "description": f"Подписка {plan['name']}",
-                "payload": f"user_{call.from_user.id}_{plan_id}"
-            }
-        ) as resp:
-        data = await resp.json()
+    "https://app.platega.io/transaction/process",
+    headers={
+        "X-MerchantId": MERCHANT_ID,
+        "X-Secret": PAYMENT_TOKEN,
+        "Content-Type": "application/json"
+    },
+    json={
+        "paymentDetails": {
+            "amount": plan["rub"],
+            "currency": "RUB"
+        },
+        "description": f"Подписка {plan['name']}",
+        "payload": f"user_{call.from_user.id}_{plan_id}"
+    }
+) as resp:
+    data = await resp.json()
 logging.info(f"PLATEGA RESPONSE: {data}")
 pay_url = data.get("redirect") or data.get("url") or data.get("payment_url")
 
