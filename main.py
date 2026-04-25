@@ -252,25 +252,30 @@ def main_menu_kb():
         [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
     ])
 # ================== HANDLERS ==================
+import os
 import asyncio
 import logging
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.filters import Command
 
-# Вставь свой токен из BotFather (лучше через os.getenv)
-TOKEN = "ТВОЙ_ТОКЕН_ЗДЕСЬ"
+# Безопасная загрузка токена из Secrets Replit
+TOKEN = os.getenv("TOKEN")
+
+if not TOKEN:
+    print("❌ ОШИБКА: Токен не найден в Secrets! Добавь переменную TOKEN в панель Secrets.")
+    exit()
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# 1. Отправка инвойса (Один блок: Текст + Кнопка оплаты + Назад)
-@dp.message(Command("start"))
-async def show_payment(message: types.Message):
+# 1. Хендлер для вызова окна оплаты (например, по команде /pay)
+@dp.message(Command("pay"))
+async def send_payment_invoice(message: types.Message):
     builder = InlineKeyboardBuilder()
-    # pay=True добавляет ту самую стрелочку в углу
+    # pay=True — это критически важно для появления стрелочки
     builder.row(types.InlineKeyboardButton(text="💸 Оплатить", pay=True))
-    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="back"))
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_menu"))
 
     await message.answer_invoice(
         title="Проверьте детали платежа:",
@@ -281,26 +286,32 @@ async def show_payment(message: types.Message):
             "💰 К оплате: 120 ⭐\n\n"
             "Нажмите 💸 Оплатить, чтобы перейти к оплате."
         ),
-        payload="sub_mini_1month", # ID для твоей базы данных
-        currency="XTR",            # XTR = Telegram Stars
+        payload="sub_mini_1month", # Уникальный ID платежа для твоей системы
+        currency="XTR",            # Код валюты для Telegram Stars
         prices=[types.LabeledPrice(label="Подписка Mini", amount=120)],
-        provider_token="",         # Для Stars всегда пусто
+        provider_token="",         # Для Stars всегда остается пустым
         reply_markup=builder.as_markup()
     )
 
-# 2. Обязательное подтверждение перед оплатой (без этого кнопка выдаст ошибку)
+# 2. Обязательное подтверждение (Pre-Checkout Query)
+# Без этого шага кнопка 'Подтвердить и заплатить' выдаст ошибку
 @dp.pre_checkout_query()
-async def pre_checkout_handler(pre_checkout_query: types.PreCheckoutQuery):
+async def process_pre_checkout(pre_checkout_query: types.PreCheckoutQuery):
     await pre_checkout_query.answer(ok=True)
 
-# 3. Обработка после успешного платежа
+# 3. Обработка успешного платежа (когда появились конфетти)
 @dp.message(F.successful_payment)
-async def success_payment(message: types.Message):
-    await message.answer("✅ Оплата прошла успешно! Ваша подписка активирована.")
+async def on_successful_payment(message: types.Message):
+    # Здесь можно добавить логику записи в базу данных
+    await message.answer("✅ Оплата прошла успешно! Ваша подписка активирована. Приятного пользования!")
 
+# Запуск бота
 async def main():
     logging.basicConfig(level=logging.INFO)
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
