@@ -285,7 +285,7 @@ async def start(message: Message):
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=main_menu_kb())
-    # --- ПЛАТЕГА ---
+# --- ПЛАТЕГА ---
 @router.callback_query(F.data.startswith("card_confirm:"))
 async def card_confirm(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
@@ -293,6 +293,7 @@ async def card_confirm(call: CallbackQuery):
 
     if not plan:
         await call.message.answer("❌ Тариф не найден")
+        await call.answer()
         return
 
     try:
@@ -315,25 +316,20 @@ async def card_confirm(call: CallbackQuery):
             }
         ) as resp:
 
-            # 🔥 диагностика ответа
             text = await resp.text()
             logger.error(f"PLATEGA RAW RESPONSE: {text}")
 
             if resp.status != 200:
-                logger.error(f"HTTP ERROR: {resp.status}")
                 await call.message.answer("❌ Ошибка платежного сервера")
+                await call.answer()
                 return
 
             data = await resp.json()
             logger.info(f"PLATEGA RESPONSE: {data}")
 
-    except Exception as e:
-        logger.exception(f"PLATEGA ERROR: {e}")
-        await call.message.answer("❌ Ошибка подключения к платёжной системе")
-
-    await call.answer()
-            pay_url = None 
         # ================= LINK =================
+        pay_url = None
+
         if isinstance(data, dict):
             pay_url = (
                 data.get("redirect")
@@ -352,6 +348,7 @@ async def card_confirm(call: CallbackQuery):
 
         if not pay_url:
             await call.message.answer("❌ Платёж создан, но ссылка не найдена")
+            await call.answer()
             return
 
         text = (
