@@ -548,21 +548,44 @@ async def pre_checkout(pre: PreCheckoutQuery):
 async def success(message: Message):
     payload = message.successful_payment.invoice_payload
 
-    # Stars и Card оплаты
     if payload.startswith("stars_") or payload.startswith("card_"):
         plan_id = payload.split("_")[1]
         days = PLANS[plan_id]["days"]
 
-        # Начисляем подписку
+        # 1. Начисляем подписку
         await extend_user(message.from_user.id, days)
 
-        # 🔥 ВАЖНО: сообщение после оплаты
-        await message.answer(
-            f"✅ Оплата прошла успешно!\n\n"
-            f"🎉 Вам начислено <b>{days} дн.</b> доступа.\n"
-            f"🔗 Доступ в канал уже открыт (или будет открыт автоматически).",
-            parse_mode="HTML"
-        )
+        try:
+            # 2. Делаем invite link НА СРОК ПОДПИСКИ
+            invite = await bot.create_chat_invite_link(
+                chat_id=CHANNEL_ID,
+                member_limit=1,
+                expire_date=datetime.now(timezone.utc) + timedelta(days=days)
+            )
+
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text="📢 Войти в закрытый канал",
+                    url=invite.invite_link
+                )]
+            ])
+
+            await message.answer(
+                f"✅ Оплата прошла успешно!\n\n"
+                f"🎉 Доступ активирован на <b>{days} дн.</b>\n"
+                f"👇 Вход в канал по кнопке ниже:",
+                reply_markup=kb,
+                parse_mode="HTML"
+            )
+
+        except Exception as e:
+            logging.error(f"Invite error: {e}")
+
+            await message.answer(
+                f"✅ Оплата прошла успешно!\n\n"
+                f"🎉 Доступ активирован на <b>{days} дн.</b>",
+                parse_mode="HTML"
+            )
 
 @router.chat_join_request()
 async def join(req: ChatJoinRequest):
