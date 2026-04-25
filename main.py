@@ -605,11 +605,11 @@ async def card_checker():
         try:
             async with aiosqlite.connect(DB_NAME) as db:
                 async with db.execute(
-                    "SELECT payload, user_id, plan_id, status FROM card_invoices WHERE status='pending'"
+                    "SELECT payload, user_id, plan_id FROM card_invoices WHERE status='pending'"
                 ) as cur:
                     invoices = await cur.fetchall()
 
-            for transaction_id, user_id, plan_id, status in invoices:
+            for transaction_id, user_id, plan_id in invoices:
 
                 try:
                     async with http_session.get(
@@ -619,14 +619,17 @@ async def card_checker():
                             "X-Secret": PAYMENT_TOKEN
                         }
                     ) as resp:
+
+                        # если API временно глючит — не падаем
+                        if resp.status != 200:
+                            continue
+
                         data = await resp.json()
 
-                    logger.info(f"CHECK TX {transaction_id}: {data}")
+                    status = str(data.get("status", "")).upper()
 
-                    tx_status = (data.get("status") or "").upper()
-
-                    # 💥 ТОЛЬКО ОДИН УСПЕШНЫЙ СТАТУС
-                    if tx_status == "CONFIRMED":
+                    # 🟢 ОПЛАЧЕНО
+                    if status == "CONFIRMED":
 
                         days = PLANS[plan_id]["days"]
 
@@ -649,36 +652,32 @@ async def card_checker():
                                 expire_date=datetime.now(timezone.utc) + timedelta(days=days)
                             )
 
+                            kb = InlineKeyboardMarkup(inline_keyboard=[
+                                [InlineKeyboardButton(
+                                    text="📢 Войти в закрытый канал",
+                                    url=invite.invite_link
+                                )]
+                            ])
+
                             await bot.send_message(
                                 user_id,
-                                f"✅ Оплата прошла!\n\n"
-                                f"🎉 Доступ на <b>{days} дн.</b>\n\n"
-                                f"👇 Вход в канал:",
-                                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                                    [InlineKeyboardButton(
-                                        text="📢 Войти в канал",
-                                        url=invite.invite_link
-                                    )]
-                                ]),
+                                f"✅ Оплата подтверждена!\n\n"
+                                f"🎉 Доступ активирован на <b>{days} дн.</b>\n"
+                                f"👇 Войти в канал:",
+                                reply_markup=kb,
                                 parse_mode="HTML"
                             )
 
                         except Exception as e:
                             logger.error(f"Invite error: {e}")
-                            await bot.send_message(
-                                user_id,
-                                f"✅ Оплата прошла!\n\n"
-                                f"🎉 Доступ на <b>{days} дн.</b>",
-                                parse_mode="HTML"
-                            )
 
                 except Exception as e:
-                    logger.error(f"CHECK ERROR {transaction_id}: {e}")
+                    logger.error(f"Transaction check error: {e}")
 
         except Exception as e:
-            logger.error(f"CARD CHECK LOOP ERROR: {e}")
+            logger.error(f"Card checker loop error: {e}")
 
-        await asyncio.sleep(15)
+        await asyncio.sleep(10)
 
 async def crypto_checker():
     while True:
