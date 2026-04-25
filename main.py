@@ -601,6 +601,7 @@ async def join(req: ChatJoinRequest):
         await req.decline()
 
 # --- BACKGROUND TASKS ---
+    
     async def card_checker():
     processed = set()
 
