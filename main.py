@@ -266,33 +266,33 @@ def main_menu_kb():
         [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
     ])
 # ================== HANDLERS ==================
-# Обработчик кнопки Stars
+# --- STARS MENU ---
 @router.callback_query(F.data == "stars")
 async def stars_menu(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
-            text=f"{p['name']} — {p['stars']} Stars", 
+            text=f"{p['name']} — {p['stars']} ⭐", 
             callback_data=f"stars_confirm:{k}"
         )]
         for k, p in PLANS.items()
     ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
     
-    await call.message.edit_text("⭐ Выберите тариф для оплаты через Telegram Stars:", reply_markup=kb)
+    await call.message.edit_text("⭐ Выберите тариф для оплаты Telegram Stars:", reply_markup=kb)
     await call.answer()
 
-# Обработчик нажатия на конкретный тариф Stars
+# --- STARS INVOICE ---
 @router.callback_query(F.data.startswith("stars_confirm:"))
 async def stars_confirm(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
     plan = PLANS[plan_id]
     
-    # Создаем счет в звездах
+    # Отправляем счет на оплату звездами
     await call.message.answer_invoice(
         title=f"Подписка: {plan['name']}",
-        description=f"Доступ на {plan['days']} дней",
+        description=f"Доступ в канал на {plan['days']} дн.",
         prices=[LabeledPrice(label=plan["name"], amount=int(plan["stars"]))],
-        payload=f"stars_{plan_id}", # Это важно для хендлера successful_payment
-        provider_token="", # Для звезд токен пустой
+        payload=f"stars_{plan_id}", 
+        provider_token="", # Для Stars токен всегда пустой
         currency="XTR"
     )
     await call.answer()
