@@ -285,8 +285,8 @@ async def start(message: Message):
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=main_menu_kb())
-    await call.answer()
-# --- КАРТА / СБП (ПЛАТЕГА) ---
+    await 
+    # --- ПЛАТЕГА ---
 @router.callback_query(F.data.startswith("card_confirm:"))
 async def card_confirm(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
@@ -306,24 +306,33 @@ async def card_confirm(call: CallbackQuery):
                 "X-Secret": PAYMENT_TOKEN,
                 "Content-Type": "application/json"
             },
-    json={
-    "paymentDetails": {
-        "amount": plan["rub"],
-        "currency": "RUB"
-    },
-    "order_id": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}",
-    "description": f"Подписка {plan['name']}"
-}
+            json={
+                "paymentDetails": {
+                    "amount": plan["rub"],
+                    "currency": "RUB"
+                },
+                "order_id": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}",
+                "description": f"Подписка {plan['name']}"
+            }
         ) as resp:
+
+            # 🔥 диагностика ответа
+            text = await resp.text()
+            logger.error(f"PLATEGA RAW RESPONSE: {text}")
 
             if resp.status != 200:
                 logger.error(f"HTTP ERROR: {resp.status}")
                 await call.message.answer("❌ Ошибка платежного сервера")
                 return
 
-            text = await resp.text()
-logger.error(f"PLATEGA RAW RESPONSE: {text}")
+            data = await resp.json()
+            logger.info(f"PLATEGA RESPONSE: {data}")
 
+    except Exception as e:
+        logger.exception(f"PLATEGA ERROR: {e}")
+        await call.message.answer("❌ Ошибка подключения к платёжной системе")
+
+    await call.answer()
         # ================= LINK =================
         pay_url = None
 
