@@ -270,9 +270,9 @@ async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=main_menu_kb())
     await call.answer()
 # --- КАРТА / СБП (ПЛАТЕГА) ---
-@router.callback_query(F.data.startswith("card_confirm:"))
+@router.callback_query(F.data.startswith("card_confirm_"))
 async def card_confirm(call: CallbackQuery):
-    plan_id = call.data.split(":")[1]
+    plan_id = call.data.split("_")[2]
     plan = PLANS.get(plan_id)
 
     if not plan:
@@ -280,7 +280,7 @@ async def card_confirm(call: CallbackQuery):
         return
 
     try:
-        logger.info(f"Platega create payment | user={call.from_user.id} plan={plan_id}")
+        logger.info(f"Platega payment | user={call.from_user.id} plan={plan_id}")
 
         async with http_session.post(
             "https://app.platega.io/transaction/process",
@@ -298,13 +298,9 @@ async def card_confirm(call: CallbackQuery):
         ) as resp:
 
             data = await resp.json()
-
-            # 🔥 ЛОГ ВСЕГО ОТВЕТА (ОБЯЗАТЕЛЬНО ДЛЯ ДИАГНОСТИКИ)
             logger.info(f"PLATEGA RESPONSE: {data}")
 
-        # ----------------------------
-        # 🔍 УМНЫЙ ПОИСК ССЫЛКИ
-        # ----------------------------
+        # ================== LINK PARSER ==================
         pay_url = None
 
         if isinstance(data, dict):
@@ -314,32 +310,30 @@ async def card_confirm(call: CallbackQuery):
                 or data.get("payment_url")
             )
 
-            # иногда API кладёт внутрь
-            if not pay_url and "result" in data:
-                pay_url = (
-                    data["result"].get("redirect")
-                    or data["result"].get("url")
-                    or data["result"].get("payment_url")
-                )
+            if not pay_url:
+                result = data.get("result", {})
+                if isinstance(result, dict):
+                    pay_url = (
+                        result.get("redirect")
+                        or result.get("url")
+                        or result.get("payment_url")
+                    )
 
         if not pay_url:
-            logger.error(f"NO PAYMENT URL | RESPONSE: {data}")
             await call.message.answer(
-                "❌ Платёж не создан.\n"
-                "Причина: API не вернул ссылку.\n\n"
-                "Проверь MERCHANT_ID / API KEY / endpoint."
+                "❌ Платёж не создан\n"
+                "Platega не вернула ссылку.\n\n"
+                "Проверь MERCHANT_ID / SECRET / API endpoint"
             )
             return
 
-        # ----------------------------
-        # UI
-        # ----------------------------
+        # ================== UI ==================
         text = (
             "<b>💳 Оплата подписки</b>\n\n"
             f"📦 Тариф: {plan['name']}\n"
             f"💰 Сумма: {plan['rub']} ₽\n"
             f"🕒 Время: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-            "Нажми кнопку ниже для оплаты 👇"
+            "Нажмите кнопку ниже 👇"
         )
 
         kb = InlineKeyboardMarkup(inline_keyboard=[
