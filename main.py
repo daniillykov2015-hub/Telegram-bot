@@ -306,12 +306,14 @@ async def card_confirm(call: CallbackQuery):
                 "X-Secret": PAYMENT_TOKEN,
                 "Content-Type": "application/json"
             },
-            json={
-                "amount": plan["rub"],
-                "currency": "RUB",
-                "order_id": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}",
-                "description": f"Подписка {plan['name']}"
-            }
+    json={
+    "paymentDetails": {
+        "amount": plan["rub"],
+        "currency": "RUB"
+    },
+    "order_id": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}",
+    "description": f"Подписка {plan['name']}"
+}
         ) as resp:
 
             if resp.status != 200:
