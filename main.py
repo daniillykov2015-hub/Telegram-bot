@@ -677,7 +677,7 @@ async def card_checker():
         except Exception as e:
             logger.error(f"Card checker loop error: {e}")
 
-        await asyncio.sleep(10)
+        await asyncio.sleep(2)
 
 async def crypto_checker():
     while True:
