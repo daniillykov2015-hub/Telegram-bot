@@ -300,12 +300,11 @@ async def card_confirm(call: CallbackQuery):
         logger.info(f"Platega payment | user={call.from_user.id} plan={plan_id}")
 
         payload = {
-            "paymentDetails": {
-                "amount": float(plan["rub"]),
-                "currency": "RUB"
-            },
+            "amount": float(plan["rub"]),
+            "currency": "RUB",
             "order_id": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}",
-            "description": f"Подписка {plan['name']}"
+            "description": f"Подписка {plan['name']}",
+            "paymentMethod": "card"
         }
 
         logger.info(f"PLATEGA REQUEST: {payload}")
@@ -336,6 +335,12 @@ async def card_confirm(call: CallbackQuery):
                 await call.message.answer("❌ Platega вернул не JSON")
                 await call.answer()
                 return
+
+    except Exception as e:
+        logger.exception(f"PLATEGA ERROR: {e}")
+        await call.message.answer("❌ Ошибка подключения к платёжной системе")
+
+    await call.answer()
 
         # ================= LINK =================
         pay_url = None
