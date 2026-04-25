@@ -285,7 +285,7 @@ async def start(message: Message):
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=main_menu_kb())
-# --- ПЛАТЕГА ---
+# --- PLATEGA ---
 @router.callback_query(F.data.startswith("card_confirm:"))
 async def card_confirm(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
@@ -336,12 +336,6 @@ async def card_confirm(call: CallbackQuery):
                 await call.answer()
                 return
 
-    except Exception as e:
-        logger.exception(f"PLATEGA ERROR: {e}")
-        await call.message.answer("❌ Ошибка подключения к платёжной системе")
-
-    await call.answer()
-
         # ================= LINK =================
         pay_url = None
 
@@ -352,8 +346,8 @@ async def card_confirm(call: CallbackQuery):
                 or data.get("payment_url")
             )
 
-            if not pay_url and isinstance(data.get("result"), dict):
-                result = data["result"]
+            result = data.get("result")
+            if not pay_url and isinstance(result, dict):
                 pay_url = (
                     result.get("redirect")
                     or result.get("url")
@@ -361,11 +355,11 @@ async def card_confirm(call: CallbackQuery):
                 )
 
         if not pay_url:
-            await call.message.answer(f"❌ Ссылка оплаты не найдена\n{data}")
+            await call.message.answer(f"❌ Ссылка оплаты не найдена\n{text}")
             await call.answer()
             return
 
-        text = (
+        text_msg = (
             "<b>💳 Оплата подписки</b>\n\n"
             f"📦 Тариф: {plan['name']}\n"
             f"💰 Сумма: {plan['rub']} ₽\n"
@@ -377,13 +371,13 @@ async def card_confirm(call: CallbackQuery):
             [InlineKeyboardButton(text="⬅ Назад", callback_data="pay_card")]
         ])
 
-        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
-        await call.answer()
+        await call.message.edit_text(text_msg, reply_markup=kb, parse_mode="HTML")
 
     except Exception as e:
         logger.exception(f"PLATEGA ERROR: {e}")
         await call.message.answer("❌ Ошибка подключения к платёжной системе")
-        await call.answer()
+
+    await call.answer()    
 # --- STARS ---
 @router.callback_query(F.data == "stars")
 async def stars_menu(call: CallbackQuery):
