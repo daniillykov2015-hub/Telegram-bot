@@ -259,11 +259,10 @@ async def stars_menu(call: CallbackQuery):
         for k, p in PLANS.items()
     ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
     
-    # Если мы вернулись назад из инвойса, сообщение может быть уже удалено, 
-    # поэтому используем try-except или answer/send
     try:
         await call.message.edit_text("⭐ Выберите тариф для оплаты Telegram Stars:", reply_markup=kb)
-    except:
+    except Exception:
+        # Если сообщение нельзя редактировать (оно уже инвойс), отправляем новое
         await call.message.answer("⭐ Выберите тариф для оплаты Telegram Stars:", reply_markup=kb)
         await call.message.delete()
     await call.answer()
@@ -277,34 +276,36 @@ async def stars_confirm(call: CallbackQuery):
         await call.answer("Тариф не найден")
         return
 
-    # Текст в точности как на Фото 2
+    # Текст сообщения в точности как на твоем скриншоте
     text = (
         "<b>Проверьте детали платежа:</b>\n\n"
         f"📦 Тариф: {plan['name']}\n"
         f"🗓 Срок: {plan['name']}\n"
         "💳 Способ оплаты: ⭐ Telegram Stars\n"
         f"💰 К оплате: {plan['stars']} ⭐\n\n"
-        "Нажмите 💸 Оплатить, чтобы перейти к подтверждению."
+        "Нажмите 💸 Оплатить, чтобы перейти к оплате."
     )
 
-    # Удаляем предыдущее меню, чтобы инвойс встал на его место
+    # Удаляем меню выбора, чтобы инвойс встал на его место
     await call.message.delete()
 
-    # Формируем клавиатуру. 
-    # ПЕРВАЯ кнопка должна быть pay=True, тогда появится стрелочка и системное окно
+    # Клавиатура инвойса
+    # Важно: кнопка оплаты (pay=True) ВСЕГДА первая, чтобы была стрелочка
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💸 Оплатить", pay=True)],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
     ])
 
+    # Отправляем инвойс. 
+    # Заголовок (title) будет жирным сверху, а текст (description) — основным телом.
     await call.message.answer_invoice(
-        title=f"Подписка: {plan['name']}",
-        description=f"Доступ в закрытый канал на {plan['name']}",
-        prices=[LabeledPrice(label="Stars", amount=plan['stars'])],
-        provider_token="", # Обязательно пусто для Stars
+        title="Проверьте детали платежа:", 
+        description=text.replace("<b>", "").replace("</b>", ""), # Инвойс может плохо переваривать HTML в description
+        prices=[LabeledPrice(label="⭐", amount=plan['stars'])],
+        provider_token="",
         payload=f"stars_{plan_id}",
         currency="XTR",
-        reply_markup=kb # Наша кнопка "Назад" теперь здесь
+        reply_markup=kb
     )
     await call.answer()
 
