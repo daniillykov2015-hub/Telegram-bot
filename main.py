@@ -387,51 +387,37 @@ async def card_confirm(call: CallbackQuery):
         return
 
     try:
-        logger.info(f"Platega create payment | user={call.from_user.id} plan={plan_id}")
-
         payload = {
-            "paymentMethod": 11,  # 11 = карта (можешь 2 для СБП)
+            "paymentMethod": 2,
             "paymentDetails": {
                 "amount": float(plan["rub"]),
                 "currency": "RUB"
             },
-            "description": f"TgId:{call.from_user.id}\nUserId:{call.from_user.id}",
-            "return": "https://t.me/your_bot",
-            "failedUrl": "https://t.me/your_bot",
-            "payload": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}"
+            "description": f"TgId:{call.from_user.id}\nUserId:{call.from_user.id}"
         }
 
+        async with http_session.post(
+            "https://app.platega.io/transaction/process",
+            headers={
+                "X-MerchantId": MERCHANT_ID,
+                "X-Secret": PAYMENT_TOKEN,
+                "Content-Type": "application/json"
+            },
+            json=payload
+        ) as resp:
 
-try:
-    async with http_session.post(
-        "https://app.platega.io/transaction/process",
-        headers={
-            "X-MerchantId": MERCHANT_ID,
-            "X-Secret": PAYMENT_TOKEN,
-            "Content-Type": "application/json"
-        },
-        json=payload
-    ) as resp:
+            text = await resp.text()
 
-        text = await resp.text()
+            logger.info(f"PLATEGA STATUS: {resp.status}")
+            logger.info(f"PLATEGA RAW RESPONSE: {text}")
 
-        logger.info(f"PLATEGA STATUS: {resp.status}")
-        logger.info(f"PLATEGA RAW RESPONSE: {text}")
-
-        data = await resp.json()
-
-except Exception as e:
-    logger.exception(f"PLATEGA ERROR: {e}")
-
-
-        logger.info(f"PLATEGA RESPONSE: {data}")
+            data = await resp.json()
 
         transaction_id = data.get("transactionId")
         pay_url = data.get("redirect")
 
         if not transaction_id or not pay_url:
-            await call.message.answer("❌ Ошибка создания платежа")
-            await call.answer()
+            await call.message.answer(f"❌ Ошибка Platega:\n{text}")
             return
 
         async with aiosqlite.connect(DB_NAME) as db:
@@ -441,22 +427,16 @@ except Exception as e:
             )
             await db.commit()
 
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💸 Оплатить", url=pay_url)],
-            [InlineKeyboardButton(text="⬅ Назад", callback_data="pay_card")]
-        ])
-
         await call.message.edit_text(
-            f"<b>💳 Оплата подписки</b>\n\n"
-            f"📦 Тариф: {plan['name']}\n"
-            f"💰 Сумма: {plan['rub']} ₽\n\n"
-            f"Нажмите кнопку ниже для оплаты",
-            reply_markup=kb,
-            parse_mode="HTML"
+            f"💳 Оплата {plan['name']}\n\n💰 {plan['rub']} ₽",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💸 Оплатить", url=pay_url)],
+                [InlineKeyboardButton(text="⬅ Назад", callback_data="pay_card")]
+            ])
         )
 
     except Exception as e:
-        logger.exception(f"PLATEGA CREATE ERROR: {e}")
+        logger.exception(f"PLATEGA ERROR: {e}")
         await call.message.answer("❌ Ошибка создания платежа")
 
     await call.answer()
