@@ -600,7 +600,8 @@ async def join(req: ChatJoinRequest):
     else:
         await req.decline()
 
-# --- BACKGROUND TASKS ---async def card_checker():
+# --- BACKGROUND TASKS ---
+    async def card_checker():
     processed = set()
 
     while True:
@@ -675,7 +676,7 @@ async def join(req: ChatJoinRequest):
         except Exception as e:
             logger.error(f"loop error: {e}")
 
-        await asyncio.sleep(1)
+        await asyncio.sleep(5)
 
 async def crypto_checker():
     while True:
