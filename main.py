@@ -649,23 +649,23 @@ async def card_checker():
 
             for payload, user_id, plan_id in invoices:
                 try:
-                async with http_session.get(
-                    f"https://app.platega.io/v2/transaction/info?payload={payload}",
-                    headers={
-                        "X-MerchantId": MERCHANT_ID,
-                        "X-Secret": PAYMENT_TOKEN
-                    }
-                ) as resp:
-                    data = await resp.json()
+                    async with http_session.get(
+                        f"https://app.platega.io/v2/transaction/info?payload={payload}",
+                        headers={
+                            "X-MerchantId": MERCHANT_ID,
+                            "X-Secret": PAYMENT_TOKEN
+                        }
+                    ) as resp:
+                        data = await resp.json()
 
-                status = str(
-                    data.get("status")
-                    or data.get("result", {}).get("status")
-                    or data.get("result", {}).get("state")
-                    or ""
-                ).lower()
+                    status = str(
+                        data.get("status")
+                        or data.get("result", {}).get("status")
+                        or data.get("result", {}).get("state")
+                        or ""
+                    ).lower()
 
-                if status in ["paid", "success", "completed", "done", "confirmed"]:
+                    if status in ["paid", "success", "completed", "done", "confirmed"]:
                         days = PLANS[plan_id]["days"]
 
                         await extend_user(user_id, days)
