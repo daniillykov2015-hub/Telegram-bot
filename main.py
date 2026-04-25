@@ -252,6 +252,22 @@ def main_menu_kb():
         [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
     ])
 # ================== HANDLERS ==================
+@router.callback_query(F.data == "pay_card")
+async def pay_card(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=f"{p['name']} — {p['rub']}₽",
+            callback_data=f"card_confirm:{k}"
+        )]
+        for k, p in PLANS.items()
+    ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
+
+    await call.message.edit_text(
+        "💳 Выберите тариф для оплаты картой / СБП:",
+        reply_markup=kb
+    )
+    await call.answer()
+
 @router.message(CommandStart())
 async def start(message: Message):
     args = message.text.split()
