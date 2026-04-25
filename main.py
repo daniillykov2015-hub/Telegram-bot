@@ -428,7 +428,7 @@ async def card_confirm(call: CallbackQuery):
             logger.info(f"PLATEGA STATUS: {resp.status}")
             logger.info(f"PLATEGA RAW RESPONSE: {text}")
 
-            if resp.status != 200:
+if resp.status != 200:
     text = await resp.text()
     await call.message.answer(
         f"❌ Ошибка Platega {resp.status}\n{text}"
