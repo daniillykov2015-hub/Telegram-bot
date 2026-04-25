@@ -547,14 +547,22 @@ async def pre_checkout(pre: PreCheckoutQuery):
 @router.message(F.successful_payment)
 async def success(message: Message):
     payload = message.successful_payment.invoice_payload
-    # Теперь проверяем и звезды, и карты (card_)
+
+    # Stars и Card оплаты
     if payload.startswith("stars_") or payload.startswith("card_"):
         plan_id = payload.split("_")[1]
         days = PLANS[plan_id]["days"]
-        
+
         # Начисляем подписку
         await extend_user(message.from_user.id, days)
-        await message.answer(f"✅ Оплата прошла успешно! Вам начислено <b>{days} дн.</b> доступа.")
+
+        # 🔥 ВАЖНО: сообщение после оплаты
+        await message.answer(
+            f"✅ Оплата прошла успешно!\n\n"
+            f"🎉 Вам начислено <b>{days} дн.</b> доступа.\n"
+            f"🔗 Доступ в канал уже открыт (или будет открыт автоматически).",
+            parse_mode="HTML"
+        )
 
 @router.chat_join_request()
 async def join(req: ChatJoinRequest):
