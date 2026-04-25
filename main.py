@@ -429,16 +429,22 @@ async def card_confirm(call: CallbackQuery):
             logger.info(f"PLATEGA RAW RESPONSE: {text}")
 
             if resp.status != 200:
-                await call.message.answer(f"❌ Ошибка Platega {resp.status}\n{text}")
-                await call.answer()
-                return
+    text = await resp.text()
+    await call.message.answer(
+        f"❌ Ошибка Platega {resp.status}\n{text}"
+    )
+    await call.answer()
+    return
 
-            try:
-                data = await resp.json()
-            except:
-                await call.message.answer("❌ Platega вернул не JSON")
-                await call.answer()
-                return
+text = await resp.text()
+logger.info(f"PLATEGA RAW: {text}")
+
+try:
+    data = json.loads(text)
+except Exception:
+    await call.message.answer("❌ Platega вернул не JSON")
+    await call.answer()
+    return
 
         # --- получаем ссылку ---
         pay_url = (
