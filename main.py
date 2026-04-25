@@ -286,7 +286,7 @@ async def card_confirm(call: CallbackQuery):
 
     try:
         async with http_session.post(
-            "https://app.platega.io/v2/transaction/process",
+            "https://app.platega.io/transaction/process",
             headers={
                 "X-MerchantId": MERCHANT_ID,
                 "X-Secret": PAYMENT_TOKEN,
