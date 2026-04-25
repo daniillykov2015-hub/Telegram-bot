@@ -300,13 +300,14 @@ async def card_confirm(call: CallbackQuery):
         logger.info(f"Platega payment | user={call.from_user.id} plan={plan_id}")
 
         payload = {
+            "command": "create",
             "paymentDetails": {
                 "amount": float(plan["rub"]),
                 "currency": "RUB"
             },
             "order_id": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}",
             "description": f"Подписка {plan['name']}",
-            "paymentMethod": "CARD"
+            "paymentMethod": "card"
         }
 
         logger.info(f"PLATEGA REQUEST: {payload}")
@@ -383,39 +384,6 @@ async def card_confirm(call: CallbackQuery):
         logger.exception(f"PLATEGA ERROR: {e}")
         await call.message.answer("❌ Ошибка подключения к платёжной системе")
 
-    await call.answer()
-# --- STARS ---
-@router.callback_query(F.data == "stars")
-async def stars_menu(call: CallbackQuery):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"{p['name']} — {p['stars']} ⭐", callback_data=f"stars_confirm:{k}")]
-        for k, p in PLANS.items()
-    ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
-    await call.message.edit_text("⭐ Выберите период подписки Stars:", reply_markup=kb)
-    await call.answer()
-
-@router.callback_query(F.data.startswith("stars_confirm:"))
-async def stars_confirm(call: CallbackQuery):
-    plan_id = call.data.split(":")[1]
-    plan = PLANS[plan_id]
-    invoice_link = await bot.create_invoice_link(
-        title="Подписка", description=f"Доступ в закрытый канал на {plan['name']}",
-        payload=f"stars_{plan_id}", provider_token="", currency="XTR", 
-        prices=[LabeledPrice(label="Оплата Stars", amount=plan['stars'])]
-    )
-    text = (
-        "<b>Проверьте детали платежа:</b>\n\n"
-        f"📦 Тариф: {plan['name']}\n"
-        f"🗓 Срок: {plan['name']}\n"
-        "💳 Способ оплаты: ⭐ Telegram Stars\n"
-        f"💰 К оплате: {plan['stars']} ⭐\n\n"
-        "Нажмите 💸 Оплатить, чтобы перейти к оплате."
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💸 Оплатить", url=invoice_link)],
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
-    ])
-    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     await call.answer()
 
 # --- CRYPTO ---
