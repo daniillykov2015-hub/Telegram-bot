@@ -266,61 +266,43 @@ def main_menu_kb():
         [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
     ])
 # ================== HANDLERS ==================
-# --- STARS MENU ---
-@router.callback_query(F.data == "stars")
-async def stars_menu(call: CallbackQuery):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text=f"{p['name']} — {p['stars']} ⭐", 
-            callback_data=f"stars_confirm:{k}"
-        )]
-        for k, p in PLANS.items()
-    ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
-    
-    await call.message.edit_text("⭐ Выберите тариф для оплаты Telegram Stars:", reply_markup=kb)
-    await call.answer()
-
-# --- STARS INVOICE ---
+# --- STARS MENU (Превью заказа) ---
 @router.callback_query(F.data.startswith("stars_confirm:"))
-async def stars_confirm(call: CallbackQuery):
+async def stars_confirm_preview(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
     plan = PLANS[plan_id]
     
-    # Отправляем счет на оплату звездами
+    text = (
+        "<b>Проверьте детали платежа:</b>\n\n"
+        f"📦 Тариф: {plan['name']}\n"
+        f"🗓 Срок: {plan['name']}\n"
+        "💳 Способ оплаты: ⭐ Telegram Stars\n"
+        f"💰 К оплате: {plan['stars']} ⭐\n\n"
+        "Нажмите 💸 Оплатить, чтобы перейти к оплате."
+    )
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💸 Оплатить", callback_data=f"stars_pay:{plan_id}")],
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
+    ])
+    
+    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    await call.answer()
+
+# --- STARS SEND INVOICE (Сама кнопка "Заплатить") ---
+@router.callback_query(F.data.startswith("stars_pay:"))
+async def stars_pay_invoice(call: CallbackQuery):
+    plan_id = call.data.split(":")[1]
+    plan = PLANS[plan_id]
+    
     await call.message.answer_invoice(
         title=f"Подписка: {plan['name']}",
         description=f"Доступ в канал на {plan['days']} дн.",
         prices=[LabeledPrice(label=plan["name"], amount=int(plan["stars"]))],
-        payload=f"stars_{plan_id}", 
-        provider_token="", # Для Stars токен всегда пустой
+        payload=f"stars_{plan_id}",
+        provider_token="",
         currency="XTR"
     )
-    await call.answer()
-
-@router.callback_query(F.data == "my_sub")
-async def my_subscription(call: CallbackQuery):
-    user_data = await get_user(call.from_user.id)
-    
-    if not user_data or not user_data[1]:
-        text = "❌ <b>У вас нет активной подписки.</b>\n\nВыберите тариф ниже, чтобы получить доступ."
-    else:
-        expiry_dt = datetime.fromisoformat(user_data[1]).replace(tzinfo=timezone.utc)
-        now = datetime.now(timezone.utc)
-        
-        if expiry_dt > now:
-            diff = expiry_dt - now
-            days = diff.days
-            hours = diff.seconds // 3600
-            text = (
-                "<b>💎 Ваша подписка активна!</b>\n\n"
-                f"⏳ Осталось: <b>{days} дн. и {hours} ч.</b>\n"
-                f"📅 Истекает: <code>{expiry_dt.strftime('%d.%m.%Y %H:%M')}</code> (UTC)"
-            )
-        else:
-            text = "❌ <b>Срок вашей подписки истек.</b>"
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
-    await call.message.edit_text(text, reply_markup=kb)
     await call.answer()
 
 @router.callback_query(F.data == "pay_card")
