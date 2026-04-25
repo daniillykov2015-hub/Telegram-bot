@@ -1,3 +1,5 @@
+Готовый: 
+
 import asyncio
 import logging
 import os
@@ -413,34 +415,32 @@ async def card_confirm(call: CallbackQuery):
 
         logger.info(f"PLATEGA REQUEST: {payload}")
 
-async with http_session.post(
-    "https://app.platega.io/v2/transaction/process",
-    headers={
-        "X-MerchantId": MERCHANT_ID,
-        "X-Secret": PAYMENT_TOKEN,
-        "Content-Type": "application/json"
-    },
-    json=payload
-) as resp:
+        async with http_session.post(
+            "https://app.platega.io/v2/transaction/process",
+            headers={
+                "X-MerchantId": MERCHANT_ID,
+                "X-Secret": PAYMENT_TOKEN,
+                "Content-Type": "application/json"
+            },
+            json=payload
+        ) as resp:
 
-    text = await resp.text()
-    logger.info(f"PLATEGA RAW: {text}")
+            text = await resp.text()
 
-    if resp.status != 200:
-        await call.message.answer(
-            f"❌ Ошибка Platega {resp.status}\n{text}"
-        )
-        await call.answer()
-        return
+            logger.info(f"PLATEGA STATUS: {resp.status}")
+            logger.info(f"PLATEGA RAW RESPONSE: {text}")
 
-    try:
-        data = json.loads(text)
-    except Exception:
-        await call.message.answer("❌ Platega вернул не JSON")
-        await call.answer()
-        return
+            if resp.status != 200:
+                await call.message.answer(f"❌ Ошибка Platega {resp.status}\n{text}")
+                await call.answer()
+                return
 
-# дальше твой код получения pay_url оставь как был
+            try:
+                data = await resp.json()
+            except:
+                await call.message.answer("❌ Platega вернул не JSON")
+                await call.answer()
+                return
 
         # --- получаем ссылку ---
         pay_url = (
@@ -709,7 +709,7 @@ async def card_checker():
         except Exception as e:
             logging.error(f"Card checker loop error: {e}")
 
-        await asyncio.sleep(5)
+        await asyncio.sleep(20)
 
 async def crypto_checker():
     while True:
