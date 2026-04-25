@@ -614,38 +614,40 @@ async def card_checker():
                     invoices = await cur.fetchall()
 
             if not invoices:
-                await asyncio.sleep(1)
+                await asyncio.sleep(5)
                 continue
 
-            for payload, user_id, plan_id in invoices:
+            for transaction_id, user_id, plan_id in invoices:
 
-                if payload in processed:
+                if transaction_id in processed:
                     continue
 
                 try:
                     async with http_session.get(
-                        f"https://app.platega.io/v2/transaction/{payload}",
+                        f"https://app.platega.io/transaction/{transaction_id}",
                         headers={
                             "X-MerchantId": MERCHANT_ID,
                             "X-Secret": PAYMENT_TOKEN
                         }
                     ) as resp:
 
+                        text = await resp.text()
+
                         if resp.status != 200:
+                            logger.error(f"Platega HTTP error {resp.status}: {text}")
                             continue
 
                         data = await resp.json()
 
-                    status = str(
-                        data.get("status")
-                        or data.get("result", {}).get("status")
-                        or ""
-                    ).upper()
+                    status = str(data.get("status", "")).upper()
 
-                    if status != "CONFIRMED":
+                    logger.info(f"PLATEGA CHECK {transaction_id}: {status}")
+
+                    # 🔥 ПРИНИМАЕМ ВСЕ УСПЕШНЫЕ ВАРИАНТЫ
+                    if status not in ("CONFIRMED", "SUCCESS", "PAID"):
                         continue
 
-                    processed.add(payload)
+                    processed.add(transaction_id)
 
                     days = PLANS[plan_id]["days"]
 
@@ -654,11 +656,10 @@ async def card_checker():
                     async with aiosqlite.connect(DB_NAME) as db:
                         await db.execute(
                             "UPDATE card_invoices SET status='paid' WHERE payload=?",
-                            (payload,)
+                            (transaction_id,)
                         )
                         await db.commit()
 
-                    # ✅ ИСПРАВЛЕНО: стабильная ссылка без expire_date
                     invite = await bot.create_chat_invite_link(
                         chat_id=CHANNEL_ID,
                         member_limit=1
@@ -672,10 +673,10 @@ async def card_checker():
                     )
 
                 except Exception as e:
-                    logger.error(f"check error: {e}")
+                    logger.error(f"card_checker inner error: {e}")
 
         except Exception as e:
-            logger.error(f"loop error: {e}")
+            logger.error(f"card_checker loop error: {e}")
 
         await asyncio.sleep(5)
 
