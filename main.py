@@ -252,21 +252,6 @@ def main_menu_kb():
         [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
     ])
 # ================== HANDLERS ==================
-@router.callback_query(F.data == "stars")
-async def stars_menu(call: CallbackQuery):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"{p['name']} — {p['stars']} ⭐", callback_data=f"stars_confirm:{k}")]
-        for k, p in PLANS.items()
-    ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
-    
-    try:
-        await call.message.edit_text("⭐ Выберите тариф для оплаты Telegram Stars:", reply_markup=kb)
-    except Exception:
-        # Если сообщение нельзя редактировать (оно уже инвойс), отправляем новое
-        await call.message.answer("⭐ Выберите тариф для оплаты Telegram Stars:", reply_markup=kb)
-        await call.message.delete()
-    await call.answer()
-
 @router.callback_query(F.data.startswith("stars_confirm:"))
 async def stars_confirm(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
@@ -276,7 +261,18 @@ async def stars_confirm(call: CallbackQuery):
         await call.answer("Тариф не найден")
         return
 
-    # Текст сообщения в точности как на твоем скриншоте
+    # 1. Сначала создаем инвойс, чтобы получить ссылку на оплату
+    # (Telegram позволяет генерировать прямые ссылки на инвойсы)
+    invoice_link = await bot.create_invoice_link(
+        title=f"Подписка: {plan['name']}",
+        description=f"Доступ в закрытый канал на {plan['name']}",
+        prices=[LabeledPrice(label="Stars", amount=plan['stars'])],
+        payload=f"stars_{plan_id}",
+        currency="XTR",
+        provider_token=""
+    )
+
+    # 2. Формируем текст в точности как на скриншоте
     text = (
         "<b>Проверьте детали платежа:</b>\n\n"
         f"📦 Тариф: {plan['name']}\n"
@@ -286,26 +282,18 @@ async def stars_confirm(call: CallbackQuery):
         "Нажмите 💸 Оплатить, чтобы перейти к оплате."
     )
 
-    # Удаляем меню выбора, чтобы инвойс встал на его место
-    await call.message.delete()
-
-    # Клавиатура инвойса
-    # Важно: кнопка оплаты (pay=True) ВСЕГДА первая, чтобы была стрелочка
+    # 3. Создаем клавиатуру со СТРЕЛОЧКОЙ (через url)
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💸 Оплатить", pay=True)],
+        [InlineKeyboardButton(text="💸 Оплатить", url=invoice_link)], # Именно url дает стрелочку в углу
         [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
     ])
 
-    # Отправляем инвойс. 
-    # Заголовок (title) будет жирным сверху, а текст (description) — основным телом.
-    await call.message.answer_invoice(
-        title="Проверьте детали платежа:", 
-        description=text.replace("<b>", "").replace("</b>", ""), # Инвойс может плохо переваривать HTML в description
-        prices=[LabeledPrice(label="⭐", amount=plan['stars'])],
-        provider_token="",
-        payload=f"stars_{plan_id}",
-        currency="XTR",
-        reply_markup=kb
+    # 4. Редактируем текущее сообщение (как в Crypto/Картах)
+    # Это позволит избежать прыгающих сообщений и удалений
+    await call.message.edit_text(
+        text=text,
+        reply_markup=kb,
+        parse_mode="HTML"
     )
     await call.answer()
 
