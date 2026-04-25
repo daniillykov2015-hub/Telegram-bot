@@ -285,7 +285,7 @@ async def card_confirm(call: CallbackQuery):
     plan = PLANS[plan_id]
 
     try:
-        async with http_session.post(
+async with http_session.post(
     "https://app.platega.io/transaction/process",
     headers={
         "X-MerchantId": MERCHANT_ID,
@@ -302,8 +302,8 @@ async def card_confirm(call: CallbackQuery):
     }
 ) as resp:
     data = await resp.json()
-logging.info(f"PLATEGA RESPONSE: {data}")
-pay_url = data.get("redirect") or data.get("url") or data.get("payment_url")
+
+    pay_url = data.get("redirect") or data.get("url") or data.get("payment_url")
 
         if not pay_url:
             await call.message.answer("❌ Ошибка создания платежа")
