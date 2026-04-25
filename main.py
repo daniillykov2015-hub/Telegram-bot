@@ -402,7 +402,7 @@ async def card_confirm(call: CallbackQuery):
         }
 
 
-        try:
+try:
     async with http_session.post(
         "https://app.platega.io/transaction/process",
         headers={
