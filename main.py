@@ -375,7 +375,7 @@ async def start(message: Message):
 async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=main_menu_kb())
 # --- PLATEGA ---@
-router.callback_query(F.data.startswith("card_confirm:"))
+@router.callback_query(F.data.startswith("card_confirm:"))
 async def card_confirm(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
     plan = PLANS.get(plan_id)
@@ -388,7 +388,6 @@ async def card_confirm(call: CallbackQuery):
     try:
         logger.info(f"Platega payment | user={call.from_user.id} plan={plan_id}")
 
-        # ================= PAYLOAD =================
         payload = {
             "paymentDetails": {
                 "amount": float(plan["rub"]),
@@ -400,20 +399,14 @@ async def card_confirm(call: CallbackQuery):
 
         logger.info(f"PLATEGA REQUEST: {payload}")
 
-        # ================= SAVE TO DB =================
+        # 💾 сохраняем в БД
         async with aiosqlite.connect(DB_NAME) as db:
             await db.execute(
                 "INSERT OR REPLACE INTO card_invoices (payload, user_id, plan_id, status) VALUES (?, ?, ?, ?)",
-                (
-                    payload["payload"],
-                    call.from_user.id,
-                    plan_id,
-                    "pending"
-                )
+                (payload["payload"], call.from_user.id, plan_id, "pending")
             )
             await db.commit()
 
-        # ================= REQUEST =================
         async with http_session.post(
             "https://app.platega.io/v2/transaction/process",
             headers={
@@ -433,21 +426,57 @@ async def card_confirm(call: CallbackQuery):
 
             data = await resp.json()
 
-        # ================= GET LINK =================
-        pay_url = (
-            data.get("url")
-            or data.get("payment_url")
-            or data.get("redirect")
-        )
+        # ================= НАДЁЖНОЕ ИЗВЛЕЧЕНИЕ ССЫЛКИ =================
+        pay_url = None
 
-        if not pay_url and isinstance(data.get("result"), dict):
-            r = data["result"]
-            pay_url = r.get("url") or r.get("payment_url") or r.get("redirect")
+        if isinstance(data, dict):
+            # 1 уровень
+            pay_url = (
+                data.get("url")
+                or data.get("payment_url")
+                or data.get("redirect")
+            )
+
+            # 2 уровень result
+            result = data.get("result")
+            if not pay_url and isinstance(result, dict):
+                pay_url = (
+                    result.get("url")
+                    or result.get("payment_url")
+                    or result.get("redirect")
+                )
+
+            # 3 уровень data (часто у Platega так)
+            inner = data.get("data")
+            if not pay_url and isinstance(inner, dict):
+                pay_url = (
+                    inner.get("url")
+                    or inner.get("payment_url")
+                    or inner.get("redirect")
+                )
 
         if not pay_url:
-            await call.message.answer("❌ Не удалось получить ссылку оплаты")
+            logger.error(f"NO PAY URL: {data}")
+            await call.message.answer("❌ Не удалось получить ссылку оплаты (Platega response пустой)")
             await call.answer()
             return
+
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💸 Оплатить", url=pay_url)],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="pay_card")]
+        ])
+
+        await call.message.edit_text(
+            f"💳 <b>Оплата {plan['name']}</b>\n\n💰 {plan['rub']} ₽",
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+
+    except Exception as e:
+        logger.exception(e)
+        await call.message.answer("❌ Ошибка обработки платежа")
+
+    await call.answer()
 
         # ================= RESPONSE =================
         text_msg = (
