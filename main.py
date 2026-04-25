@@ -270,40 +270,17 @@ async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=main_menu_kb())
     await call.answer()
 # --- КАРТА / СБП (ПЛАТЕГА) ---
-import logging
-from datetime import datetime
-
-logger = logging.getLogger("platega")
-
-@router.callback_query(F.data == "pay_card")
-async def card_menu(call: CallbackQuery):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text=f"{p['name']} — {p['rub']}₽",
-            callback_data=f"card_confirm:{k}"
-        )]
-        for k, p in PLANS.items()
-    ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
-
-    await call.message.edit_text(
-        "💳 Выберите период подписки (Карта / СБП):",
-        reply_markup=kb
-    )
-    await call.answer()
-
-
 @router.callback_query(F.data.startswith("card_confirm:"))
 async def card_confirm(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
     plan = PLANS.get(plan_id)
 
     if not plan:
-        logger.error(f"[{datetime.now()}] Invalid plan_id: {plan_id}")
-        await call.message.answer("❌ Ошибка: тариф не найден")
+        await call.message.answer("❌ Тариф не найден")
         return
 
     try:
-        logger.info(f"[{datetime.now()}] Creating payment: user={call.from_user.id}, plan={plan_id}")
+        logger.info(f"Platega create payment | user={call.from_user.id} plan={plan_id}")
 
         async with http_session.post(
             "https://app.platega.io/transaction/process",
@@ -313,36 +290,56 @@ async def card_confirm(call: CallbackQuery):
                 "Content-Type": "application/json"
             },
             json={
-                "paymentDetails": {
-                    "amount": plan["rub"],
-                    "currency": "RUB"
-                },
-                "description": f"Подписка {plan['name']}",
-                "payload": f"user_{call.from_user.id}_{plan_id}"
+                "amount": plan["rub"],
+                "currency": "RUB",
+                "order_id": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}",
+                "description": f"Подписка {plan['name']}"
             }
         ) as resp:
 
             data = await resp.json()
-            logger.info(f"[{datetime.now()}] Platega response: {data}")
 
+            # 🔥 ЛОГ ВСЕГО ОТВЕТА (ОБЯЗАТЕЛЬНО ДЛЯ ДИАГНОСТИКИ)
+            logger.info(f"PLATEGA RESPONSE: {data}")
+
+        # ----------------------------
+        # 🔍 УМНЫЙ ПОИСК ССЫЛКИ
+        # ----------------------------
+        pay_url = None
+
+        if isinstance(data, dict):
             pay_url = (
                 data.get("redirect")
                 or data.get("url")
                 or data.get("payment_url")
             )
 
-            if not pay_url:
-                logger.error(f"[{datetime.now()}] No payment URL in response: {data}")
-                await call.message.answer("❌ Ошибка создания платежа (нет ссылки)")
-                return
+            # иногда API кладёт внутрь
+            if not pay_url and "result" in data:
+                pay_url = (
+                    data["result"].get("redirect")
+                    or data["result"].get("url")
+                    or data["result"].get("payment_url")
+                )
 
+        if not pay_url:
+            logger.error(f"NO PAYMENT URL | RESPONSE: {data}")
+            await call.message.answer(
+                "❌ Платёж не создан.\n"
+                "Причина: API не вернул ссылку.\n\n"
+                "Проверь MERCHANT_ID / API KEY / endpoint."
+            )
+            return
+
+        # ----------------------------
+        # UI
+        # ----------------------------
         text = (
-            "<b>Проверьте детали платежа:</b>\n\n"
+            "<b>💳 Оплата подписки</b>\n\n"
             f"📦 Тариф: {plan['name']}\n"
-            f"💳 Способ: Карта / СБП\n"
-            f"💰 К оплате: {plan['rub']} ₽\n"
+            f"💰 Сумма: {plan['rub']} ₽\n"
             f"🕒 Время: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-            "Нажмите кнопку ниже для оплаты."
+            "Нажми кнопку ниже для оплаты 👇"
         )
 
         kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -353,7 +350,7 @@ async def card_confirm(call: CallbackQuery):
         await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
 
     except Exception as e:
-        logger.exception(f"[{datetime.now()}] Platega error: {e}")
+        logger.exception(f"PLATEGA ERROR: {e}")
         await call.message.answer("❌ Ошибка подключения к платёжной системе")
 
     await call.answer()
