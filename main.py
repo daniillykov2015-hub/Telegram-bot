@@ -23,6 +23,7 @@ from aiogram.exceptions import TelegramBadRequest
 
 # ================== CONFIG ==================
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
@@ -251,6 +252,77 @@ def main_menu_kb():
         [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
     ])
 # ================== HANDLERS ==================
+# ================== STARS PAYMENT (из main 2) ==================
+
+@router.callback_query(F.data == "stars")
+async def stars_menu(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=f"{p['name']} — {p['stars']} ⭐",
+            callback_data=f"stars_confirm:{k}"
+        )]
+        for k, p in PLANS.items()
+    ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
+
+    await call.message.edit_text(
+        "⭐ Выберите период подписки Stars:",
+        reply_markup=kb
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("stars_confirm:"))
+async def stars_confirm(call: CallbackQuery):
+    plan_id = call.data.split(":")[1]
+    plan = PLANS.get(plan_id)
+
+    if not plan:
+        await call.message.answer("❌ Тариф не найден")
+        await call.answer()
+        return
+
+    invoice_link = await bot.create_invoice_link(
+        title="Подписка",
+        description=f"Доступ в закрытый канал на {plan['name']}",
+        payload=f"stars_{plan_id}",
+        provider_token="",
+        currency="XTR",
+        prices=[LabeledPrice(label="Оплата Stars", amount=plan["stars"])]
+    )
+
+    text = (
+        "<b>Проверьте детали платежа:</b>\n\n"
+        f"📦 Тариф: {plan['name']}\n"
+        f"🗓 Срок: {plan['name']}\n"
+        "💳 Способ оплаты: ⭐ Telegram Stars\n"
+        f"💰 К оплате: {plan['stars']} ⭐\n\n"
+        "Нажмите 💸 Оплатить, чтобы перейти к оплате."
+    )
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💸 Оплатить", url=invoice_link)],
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
+    ])
+
+    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    await call.answer()
+
+@router.callback_query(F.data == "pay_card")
+async def pay_card(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=f"{p['name']} — {p['rub']}₽",
+            callback_data=f"card_confirm:{k}"
+        )]
+        for k, p in PLANS.items()
+    ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
+
+    await call.message.edit_text(
+        "💳 Выберите тариф для оплаты картой / СБП:",
+        reply_markup=kb
+    )
+    await call.answer()
+
 @router.message(CommandStart())
 async def start(message: Message):
     args = message.text.split()
@@ -268,70 +340,109 @@ async def start(message: Message):
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=main_menu_kb())
-    await call.answer()
-# --- КАРТА / СБП (ПЛАТЕГА) ---
-@router.callback_query(F.data == "pay_card")
-async def card_menu(call: CallbackQuery):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"{p['name']} — {p['rub']}₽", callback_data=f"card_confirm:{k}")]
-        for k, p in PLANS.items()
-    ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
-    await call.message.edit_text("💳 Выберите период подписки (Оплата картой или СБП):", reply_markup=kb)
-    await call.answer()
-
+# --- PLATEGA ---
 @router.callback_query(F.data.startswith("card_confirm:"))
 async def card_confirm(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
-    plan = PLANS[plan_id]
-    
-    # Сумма указывается в копейках (рубли * 100)
-    prices = [LabeledPrice(label=f"Подписка {plan['name']}", amount=plan['rub'] * 100)]
-    
-    await bot.send_invoice(
-        chat_id=call.from_user.id,
-        title="Оплата подписки",
-        description=f"Доступ в закрытый канал на {plan['name']}",
-        payload=f"card_{plan_id}",
-        provider_token=PAYMENT_TOKEN,
-        currency="RUB",
-        prices=prices,
-        start_parameter="sub_pay"
-    )
-    await call.answer()
-# --- STARS ---
-@router.callback_query(F.data == "stars")
-async def stars_menu(call: CallbackQuery):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"{p['name']} — {p['stars']} ⭐", callback_data=f"stars_confirm:{k}")]
-        for k, p in PLANS.items()
-    ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
-    await call.message.edit_text("⭐ Выберите период подписки Stars:", reply_markup=kb)
-    await call.answer()
+    plan = PLANS.get(plan_id)
 
-@router.callback_query(F.data.startswith("stars_confirm:"))
-async def stars_confirm(call: CallbackQuery):
-    plan_id = call.data.split(":")[1]
-    plan = PLANS[plan_id]
-    invoice_link = await bot.create_invoice_link(
-        title="Подписка", description=f"Доступ в закрытый канал на {plan['name']}",
-        payload=f"stars_{plan_id}", provider_token="", currency="XTR", 
-        prices=[LabeledPrice(label="Оплата Stars", amount=plan['stars'])]
-    )
-    text = (
-        "<b>Проверьте детали платежа:</b>\n\n"
-        f"📦 Тариф: {plan['name']}\n"
-        f"🗓 Срок: {plan['name']}\n"
-        "💳 Способ оплаты: ⭐ Telegram Stars\n"
-        f"💰 К оплате: {plan['stars']} ⭐\n\n"
-        "Нажмите 💸 Оплатить, чтобы перейти к оплате."
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💸 Оплатить", url=invoice_link)],
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
-    ])
-    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
-    await call.answer()
+    if not plan:
+        await call.message.answer("❌ Тариф не найден")
+        await call.answer()
+        return
 
+    try:
+        logger.info(f"Platega payment | user={call.from_user.id} plan={plan_id}")
+
+        # Формируем payload согласно документации v2
+        payload = {
+            "paymentDetails": {
+                "amount": float(plan["rub"]),
+                "currency": "RUB"
+            },
+            # Обязательный формат для описания (без пробелов после двоеточия для ID)
+            "description": f"TgId:{call.from_user.id} UserId:{call.from_user.id} | {plan['name']}",
+            # Ваш внутренний ID заказа для отслеживания
+            "payload": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}"
+        }
+
+        logger.info(f"PLATEGA REQUEST: {payload}")
+
+        async with http_session.post(
+            "https://app.platega.io/v2/transaction/process", # Добавлен v2
+            headers={
+                "X-MerchantId": MERCHANT_ID,
+                "X-Secret": PAYMENT_TOKEN,
+                "Content-Type": "application/json"
+            },
+            json=payload
+        ) as resp:
+
+            text = await resp.text()
+
+            logger.info(f"PLATEGA STATUS: {resp.status}")
+            logger.info(f"PLATEGA RAW RESPONSE: {text}")
+
+            if resp.status != 200:
+                await call.message.answer(f"❌ Ошибка Platega {resp.status}\n{text}")
+                await call.answer()
+                return
+
+            try:
+                data = await resp.json()
+            except Exception:
+                await call.message.answer("❌ Platega вернул не JSON")
+                await call.answer()
+                return
+
+        # ================= LINK =================
+        pay_url = None
+
+        if isinstance(data, dict):
+            # Проверяем все возможные ключи ссылки в ответе
+            pay_url = (
+                data.get("url") 
+                or data.get("redirect") 
+                or data.get("payment_url")
+            )
+            
+            # Если ссылка вложена в объект result
+            result = data.get("result")
+            if not pay_url and isinstance(result, dict):
+                pay_url = (
+                    result.get("url") 
+                    or result.get("redirect") 
+                    or result.get("payment_url")
+                )
+
+        if not pay_url:
+            await call.message.answer(f"❌ Ссылка оплаты не найдена\n{text}")
+            await call.answer()
+            return
+
+        text_msg = (
+            "<b>💳 Оплата подписки</b>\n\n"
+            f"📦 Тариф: {plan['name']}\n"
+            f"💰 Сумма: {plan['rub']} ₽\n"
+            f"🕒 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        )
+
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💸 Оплатить", url=pay_url)],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="pay_card")]
+        ])
+
+        await call.message.edit_text(
+            text_msg,
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+
+    except Exception as e:
+        logger.exception(f"PLATEGA ERROR: {e}")
+        await call.message.answer("❌ Ошибка подключения к платёжной системе")
+
+    await call.answer()
 # --- CRYPTO ---
 @router.callback_query(F.data == "crypto")
 async def crypto_menu(call: CallbackQuery):
