@@ -410,8 +410,12 @@ async def card_confirm(call: CallbackQuery):
             },
             json=payload
         ) as resp:
+            text = await resp.text()
 
-            data = await resp.json()
+logger.info(f"PLATEGA STATUS: {resp.status}")
+logger.info(f"PLATEGA RAW RESPONSE: {text}")
+        
+
 
         logger.info(f"PLATEGA RESPONSE: {data}")
 
