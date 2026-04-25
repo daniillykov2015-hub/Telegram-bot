@@ -401,19 +401,18 @@ async def card_confirm(call: CallbackQuery):
             "payload": f"{call.from_user.id}_{plan_id}_{int(datetime.now().timestamp())}"
         }
 
-        async with http_session.post(
-            "https://app.platega.io/transaction/process",
-            headers={
-                "X-MerchantId": MERCHANT_ID,
-                "X-Secret": PAYMENT_TOKEN,
-                "Content-Type": "application/json"
-            },
-            json=payload
-        ) as resp:
-            text = await resp.text()
+try:
+    async with http_session.post(...) as resp:
 
-logger.info(f"PLATEGA STATUS: {resp.status}")
-logger.info(f"PLATEGA RAW RESPONSE: {text}")
+        text = await resp.text()
+
+        logger.info(f"PLATEGA STATUS: {resp.status}")
+        logger.info(f"PLATEGA RAW RESPONSE: {text}")
+
+        data = await resp.json()
+
+except Exception as e:
+    logger.exception(f"PLATEGA ERROR: {e}")
         
 
 
