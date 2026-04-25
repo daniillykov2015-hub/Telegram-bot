@@ -252,6 +252,22 @@ def main_menu_kb():
         [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
     ])
 # ================== HANDLERS ==================
+@router.callback_query(F.data == "stars")
+async def stars_menu(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"{p['name']} — {p['stars']}⭐", callback_data=f"stars_plan:{k}")]
+        for k, p in PLANS.items()
+    ] + [
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
+    ])
+
+    await call.message.edit_text(
+        "⭐ <b>Оплата Stars</b>\n\nВыбери тариф:",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+    await call.answer()
+
 @router.callback_query(F.data == "pay_card")
 async def pay_card(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -285,43 +301,7 @@ async def start(message: Message):
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=main_menu_kb())
-
-# --- PLATEGA --- 
-@router.callback_query(F.data.startswith("stars_invoice:"))
-async def stars_invoice(call: CallbackQuery):
-    plan_id = call.data.split(":")[1]
-    plan = PLANS[plan_id]
-
-    await bot.send_invoice(
-        chat_id=call.from_user.id,
-        title="Подписка",
-        description=f"{plan['name']}",
-        payload=f"stars_{plan_id}",
-        provider_token="",
-        currency="XTR",
-        prices=[LabeledPrice(label=plan["name"], amount=plan["stars"])],
-    )
-
-    await call.answer()
-
-@router.callback_query(F.data.startswith("stars_pay:"))
-async def stars_preview(call: CallbackQuery):
-    plan_id = call.data.split(":")[1]
-    plan = PLANS[plan_id]
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💸 Оплатить", callback_data=f"stars_invoice:{plan_id}")],
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
-    ])
-
-    await call.message.edit_text(
-        f"<b>⭐ Подписка</b>\n\n"
-        f"📦 Тариф: {plan['name']}\n"
-        f"💰 Цена: {plan['stars']}⭐",
-        reply_markup=kb
-    )
-    await call.answer()
-
+# --- PLATEGA ---
 @router.callback_query(F.data.startswith("card_confirm:"))
 async def card_confirm(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
@@ -376,7 +356,6 @@ async def card_confirm(call: CallbackQuery):
                 await call.answer()
                 return
 
-        
         # ================= LINK =================
         pay_url = None
 
