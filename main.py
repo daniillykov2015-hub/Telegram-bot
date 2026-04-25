@@ -603,8 +603,6 @@ async def join(req: ChatJoinRequest):
 # --- BACKGROUND TASKS ---
 
 async def card_checker():
-    processed = set()
-
     while True:
         try:
             async with aiosqlite.connect(DB_NAME) as db:
@@ -614,17 +612,14 @@ async def card_checker():
                     invoices = await cur.fetchall()
 
             if not invoices:
-                await asyncio.sleep(2)
+                await asyncio.sleep(5)
                 continue
 
             for payload, user_id, plan_id in invoices:
 
-                if payload in processed:
-                    continue
-
                 try:
                     async with http_session.get(
-                        f"https://app.platega.io/v2/transaction/{payload}",
+                        f"https://app.platega.io/transaction/{payload}",
                         headers={
                             "X-MerchantId": MERCHANT_ID,
                             "X-Secret": PAYMENT_TOKEN
@@ -636,27 +631,28 @@ async def card_checker():
 
                         data = await resp.json()
 
-                    status = str(
+                    status = (
                         data.get("status")
                         or data.get("result", {}).get("status")
                         or ""
                     ).upper()
 
+                    if status in ("PENDING", ""):
+                        continue
+
                     if status != "CONFIRMED":
                         continue
 
-                    processed.add(payload)
-
-                    days = PLANS[plan_id]["days"]
-
-                    await extend_user(user_id, days)
-
+                    # 🔥 сразу помечаем как обработанный в БД (важнее чем set)
                     async with aiosqlite.connect(DB_NAME) as db:
                         await db.execute(
                             "UPDATE card_invoices SET status='paid' WHERE payload=?",
                             (payload,)
                         )
                         await db.commit()
+
+                    days = PLANS[plan_id]["days"]
+                    await extend_user(user_id, days)
 
                     invite = await bot.create_chat_invite_link(
                         chat_id=CHANNEL_ID,
@@ -672,10 +668,10 @@ async def card_checker():
                     )
 
                 except Exception as e:
-                    logger.error(f"check error: {e}")
+                    logger.error(f"card check item error: {e}")
 
         except Exception as e:
-            logger.error(f"loop error: {e}")
+            logger.error(f"card checker loop error: {e}")
 
         await asyncio.sleep(5)
 
