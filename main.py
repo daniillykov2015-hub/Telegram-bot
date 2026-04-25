@@ -350,7 +350,7 @@ async def card_confirm(call: CallbackQuery):
                 await call.answer()
                 return
 
-        # ================= LINK =================
+# ================= LINK =================
         pay_url = None
 
         if isinstance(data, dict):
@@ -375,6 +375,20 @@ async def card_confirm(call: CallbackQuery):
             await call.answer()
             return
 
+        # --- НОВЫЙ КОД: СОХРАНЯЕМ ТРАНЗАКЦИЮ В БД ---
+        # Вытаскиваем ID транзакции из ответа, чтобы чекер знал, что проверять
+        payment_id = data.get("id") or (result.get("id") if isinstance(result, dict) else None)
+        
+        if payment_id:
+            async with aiosqlite.connect(DB_NAME) as db:
+                await db.execute(
+                    "INSERT INTO platega_invoices (payment_id, user_id, plan_id) VALUES (?, ?, ?)",
+                    (str(payment_id), call.from_user.id, plan_id)
+                )
+                await db.commit()
+            logger.info(f"Platega invoice created: {payment_id} for user {call.from_user.id}")
+        # --------------------------------------------
+
         text_msg = (
             "<b>💳 Оплата подписки</b>\n\n"
             f"📦 Тариф: {plan['name']}\n"
@@ -397,7 +411,7 @@ async def card_confirm(call: CallbackQuery):
         logger.exception(f"PLATEGA ERROR: {e}")
         await call.message.answer("❌ Ошибка подключения к платёжной системе")
 
-    await call.answer()
+    await call.answer()       
 # --- CRYPTO ---
 @router.callback_query(F.data == "crypto")
 async def crypto_menu(call: CallbackQuery):
