@@ -252,50 +252,6 @@ def main_menu_kb():
         [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
     ])
 # ================== HANDLERS ==================
-@router.callback_query(F.data.startswith("stars_confirm:"))
-async def stars_confirm(call: CallbackQuery):
-    plan_id = call.data.split(":")[1]
-    plan = PLANS.get(plan_id)
-    
-    if not plan:
-        await call.answer("Ошибка: тариф не найден")
-        return
-
-    try:
-        # Генерируем прямую ссылку на оплату звездами
-        invoice_link = await call.bot.create_invoice_link(
-            title=f"Подписка: {plan['name']}",
-            description=f"Доступ в канал на {plan['name']}",
-            payload=f"stars_{plan_id}",
-            provider_token="", # Для Stars всегда пусто
-            currency="XTR",
-            prices=[LabeledPrice(label="⭐", amount=plan['stars'])]
-        )
-
-        # Текст один в один как на твоем скрине
-        text = (
-            "<b>Проверьте детали платежа:</b>\n\n"
-            f"📦 Тариф: {plan['name']}\n"
-            f"🗓 Срок: {plan['name']}\n"
-            "💳 Способ оплаты: ⭐ Telegram Stars\n"
-            f"💰 К оплате: {plan['stars']} ⭐\n\n"
-            "Нажмите 💸 Оплатить, чтобы перейти к оплате."
-        )
-
-        # Кнопка со ссылкой (даст стрелочку) и кнопка назад
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💸 Оплатить", url=invoice_link)],
-            [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
-        ])
-
-        await call.message.edit_text(text, reply_markup=kb)
-        await call.answer()
-
-    except Exception as e:
-        # Если ссылка не создалась (например, не настроены платежи в BotFather)
-        print(f"Ошибка при создании счета: {e}")
-        await call.answer("❌ Ошибка при формировании счета. Проверьте настройки BotFather.", show_alert=True)
-
 @router.callback_query(F.data == "pay_card")
 async def pay_card(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
