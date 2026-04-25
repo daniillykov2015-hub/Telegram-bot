@@ -339,12 +339,6 @@ async def card_confirm(call: CallbackQuery):
                 await call.answer()
                 return
 
-    except Exception as e:
-        logger.exception(f"PLATEGA ERROR: {e}")
-        await call.message.answer("❌ Ошибка подключения к платёжной системе")
-
-    await call.answer()
-
         # ================= LINK =================
         pay_url = None
 
@@ -368,6 +362,7 @@ async def card_confirm(call: CallbackQuery):
             await call.answer()
             return
 
+        # ================= MESSAGE =================
         text_msg = (
             "<b>💳 Оплата подписки</b>\n\n"
             f"📦 Тариф: {plan['name']}\n"
@@ -386,7 +381,7 @@ async def card_confirm(call: CallbackQuery):
         logger.exception(f"PLATEGA ERROR: {e}")
         await call.message.answer("❌ Ошибка подключения к платёжной системе")
 
-    await call.answer()    
+    await call.answer()
 # --- STARS ---
 @router.callback_query(F.data == "stars")
 async def stars_menu(call: CallbackQuery):
