@@ -319,8 +319,8 @@ async def card_confirm(call: CallbackQuery):
                 await call.message.answer("❌ Ошибка платежного сервера")
                 return
 
-            data = await resp.json()
-            logger.info(f"PLATEGA RESPONSE: {data}")
+            text = await resp.text()
+logger.error(f"PLATEGA RAW RESPONSE: {text}")
 
         # ================= LINK =================
         pay_url = None
