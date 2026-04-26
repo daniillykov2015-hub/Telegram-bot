@@ -628,6 +628,10 @@ async def card_checker():
                 ) as cur:
                     invoices = await cur.fetchall()
 
+            if not invoices:
+                await asyncio.sleep(5)
+                continue
+
             for transaction_id, user_id, plan_id in invoices:
 
                 if transaction_id in processed:
@@ -642,12 +646,17 @@ async def card_checker():
                         }
                     ) as resp:
 
+                        text = await resp.text()
+
                         if resp.status != 200:
+                            logger.error(f"Platega HTTP error {resp.status}: {text}")
                             continue
 
                         data = await resp.json()
 
                     status = str(data.get("status", "")).upper()
+
+                    logger.info(f"PLATEGA CHECK {transaction_id}: {status}")
 
                     if status not in ("CONFIRMED", "SUCCESS", "PAID"):
                         continue
@@ -656,9 +665,10 @@ async def card_checker():
 
                     days = PLANS[plan_id]["days"]
 
-                    # 🔥 только начисление
+                    # 1. начисляем подписку
                     await extend_user(user_id, days)
 
+                    # 2. обновляем статус оплаты
                     async with aiosqlite.connect(DB_NAME) as db:
                         await db.execute(
                             "UPDATE card_invoices SET status='paid' WHERE payload=?",
@@ -666,12 +676,20 @@ async def card_checker():
                         )
                         await db.commit()
 
-                    # 🔥 БЕЗ ССЫЛОК ВООБЩЕ
+                    # 3. отправляем доступ БЕЗ инвайт-ссылок
                     await bot.send_message(
                         user_id,
                         f"✅ Оплата подтверждена!\n\n"
                         f"🎉 Доступ активирован на {days} дн.\n"
-                        f"👉 Просто нажми «Войти в канал» в боте"
+                        f"👇 Нажми кнопку ниже, чтобы перейти в канал:",
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                            [
+                                InlineKeyboardButton(
+                                    text="🚀 Перейти в канал",
+                                    url=f"https://t.me/{CHANNEL_USERNAME}"
+                                )
+                            ]
+                        ])
                     )
 
                 except Exception as e:
@@ -680,7 +698,7 @@ async def card_checker():
         except Exception as e:
             logger.error(f"card_checker loop error: {e}")
 
-        await asyncio.sleep(15)
+        await asyncio.sleep(5)
 
 async def crypto_checker():
     while True:
