@@ -643,7 +643,6 @@ async def card_checker():
 
                     logger.info(f"PLATEGA CHECK {transaction_id}: {status}")
 
-                    # 🔥 ПРИНИМАЕМ ВСЕ УСПЕШНЫЕ ВАРИАНТЫ
                     if status not in ("CONFIRMED", "SUCCESS", "PAID"):
                         continue
 
@@ -660,16 +659,18 @@ async def card_checker():
                         )
                         await db.commit()
 
+                    # 🔥 ВАЖНО: нормальная ссылка с сроком
                     invite = await bot.create_chat_invite_link(
                         chat_id=CHANNEL_ID,
-                        member_limit=1
+                        member_limit=1,
+                        expire_date=datetime.now(timezone.utc) + timedelta(minutes=10)
                     )
 
                     await bot.send_message(
                         user_id,
                         f"✅ Оплата подтверждена!\n\n"
                         f"🎉 Доступ активирован на {days} дн.\n"
-                        f"👇 Войти в канал: {invite.invite_link}"
+                        f"👇 Войти в канал:\n{invite.invite_link}"
                     )
 
                 except Exception as e:
