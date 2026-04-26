@@ -28,7 +28,6 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
 CHANNEL_ID = os.getenv("TELEGRAM_GROUP_ID")
-CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME")
 # Названия переменных точно как на твоем скриншоте
 PAYMENT_TOKEN = os.getenv("PLATEGA_API_KEY") 
 MERCHANT_ID = os.getenv("PLATEGA_MERCHANT_ID")
@@ -638,7 +637,11 @@ async def card_checker():
                             logger.error(f"Platega HTTP error {resp.status}: {text}")
                             continue
 
-                        data = await resp.json()
+                        try:
+                            data = await resp.json()
+                        except Exception:
+                            logger.error(f"Platega invalid JSON: {text}")
+                            continue
 
                     status = str(data.get("status", "")).upper()
 
@@ -662,20 +665,28 @@ async def card_checker():
                         )
                         await db.commit()
 
-                    # 3. отправляем доступ БЕЗ инвайт-ссылок
+                    # 3. создаём invite link в приватный канал
+                    invite = await bot.create_chat_invite_link(
+                        chat_id=CHANNEL_ID,
+                        member_limit=1,
+                        expire_date=datetime.now(timezone.utc) + timedelta(days=days)
+                    )
+
+                    # 4. отправляем доступ пользователю
+                    kb = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(
+                            text="📢 Войти в закрытый канал",
+                            url=invite.invite_link
+                        )]
+                    ])
+
                     await bot.send_message(
                         user_id,
                         f"✅ Оплата подтверждена!\n\n"
-                        f"🎉 Доступ активирован на {days} дн.\n"
-                        f"👇 Нажми кнопку ниже, чтобы перейти в канал:",
-                        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                            [
-                                InlineKeyboardButton(
-                                    text="🚀 Перейти в канал",
-                                    url=f"https://t.me/{CHANNEL_USERNAME}"
-                                )
-                            ]
-                        ])
+                        f"🎉 Доступ активирован на <b>{days} дн.</b>\n"
+                        f"👇 Вход в канал по кнопке ниже:",
+                        reply_markup=kb,
+                        parse_mode="HTML"
                     )
 
                 except Exception as e:
