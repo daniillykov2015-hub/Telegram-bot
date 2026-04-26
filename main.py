@@ -387,7 +387,10 @@ async def card_confirm(call: CallbackQuery):
         return
 
     try:
-        # 1. проверяем есть ли уже активный платёж
+        transaction_id = None
+        pay_url = None
+
+        # 1. проверяем есть ли уже платёж
         async with aiosqlite.connect(DB_NAME) as db:
             async with db.execute(
                 "SELECT payload FROM card_invoices WHERE user_id=? AND plan_id=? AND status='pending'",
@@ -395,7 +398,7 @@ async def card_confirm(call: CallbackQuery):
             ) as cur:
                 existing = await cur.fetchone()
 
-        # 2. если есть — пытаемся использовать его
+        # 2. если есть — проверяем его живость
         if existing:
             transaction_id = existing[0]
 
@@ -406,68 +409,70 @@ async def card_confirm(call: CallbackQuery):
                     "X-Secret": PAYMENT_TOKEN
                 }
             ) as resp:
-
-                data = await resp.json()
+                try:
+                    data = await resp.json()
+                except Exception:
+                    data = {}
 
             pay_url = data.get("redirect")
 
-            if pay_url:
-                kb = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="💸 Оплатить", url=pay_url)],
-                    [InlineKeyboardButton(text="⬅ Назад", callback_data="pay_card")]
-                ])
+            # ❗ если ссылка умерла — помечаем и пересоздаём
+            if not pay_url:
+                async with aiosqlite.connect(DB_NAME) as db:
+                    await db.execute(
+                        "UPDATE card_invoices SET status='expired' WHERE payload=?",
+                        (transaction_id,)
+                    )
+                    await db.commit()
 
-                await call.message.edit_text(
-                    f"💳 У тебя уже есть активная оплата\n\n💰 {plan['rub']} ₽",
-                    reply_markup=kb
+                transaction_id = None
+                pay_url = None
+
+        # 3. если нет живого платежа — создаём новый
+        if not transaction_id:
+            payload = {
+                "paymentMethod": 2,
+                "paymentDetails": {
+                    "amount": float(plan["rub"]),
+                    "currency": "RUB"
+                },
+                "description": f"TgId:{call.from_user.id}\nUserId:{call.from_user.id}"
+            }
+
+            async with http_session.post(
+                "https://app.platega.io/transaction/process",
+                headers={
+                    "X-MerchantId": MERCHANT_ID,
+                    "X-Secret": PAYMENT_TOKEN,
+                    "Content-Type": "application/json"
+                },
+                json=payload
+            ) as resp:
+
+                text = await resp.text()
+
+                try:
+                    data = await resp.json()
+                except Exception:
+                    await call.message.answer("❌ Ошибка платежного сервиса")
+                    return
+
+            transaction_id = data.get("transactionId")
+            pay_url = data.get("redirect")
+
+            if not transaction_id or not pay_url:
+                await call.message.answer(f"❌ Ошибка Platega:\n{text}")
+                return
+
+            # сохраняем новый платеж
+            async with aiosqlite.connect(DB_NAME) as db:
+                await db.execute(
+                    "INSERT INTO card_invoices (payload, user_id, plan_id, status) VALUES (?, ?, ?, ?)",
+                    (transaction_id, call.from_user.id, plan_id, "pending")
                 )
-                await call.answer()
-                return
+                await db.commit()
 
-        # 3. если нет — создаём новый платёж
-        payload = {
-            "paymentMethod": 2,
-            "paymentDetails": {
-                "amount": float(plan["rub"]),
-                "currency": "RUB"
-            },
-            "description": f"TgId:{call.from_user.id}\nUserId:{call.from_user.id}"
-        }
-
-        async with http_session.post(
-            "https://app.platega.io/transaction/process",
-            headers={
-                "X-MerchantId": MERCHANT_ID,
-                "X-Secret": PAYMENT_TOKEN,
-                "Content-Type": "application/json"
-            },
-            json=payload
-        ) as resp:
-
-            text = await resp.text()
-
-            try:
-                data = await resp.json()
-            except Exception:
-                await call.message.answer("❌ Ошибка платежного сервиса")
-                return
-
-        transaction_id = data.get("transactionId")
-        pay_url = data.get("redirect")
-
-        if not transaction_id or not pay_url:
-            await call.message.answer(f"❌ Ошибка Platega:\n{text}")
-            return
-
-        # 4. сохраняем в БД
-        async with aiosqlite.connect(DB_NAME) as db:
-            await db.execute(
-                "INSERT INTO card_invoices (payload, user_id, plan_id, status) VALUES (?, ?, ?, ?)",
-                (transaction_id, call.from_user.id, plan_id, "pending")
-            )
-            await db.commit()
-
-        # 5. отправляем пользователю
+        # 4. отправляем пользователю актуальную ссылку
         await call.message.edit_text(
             f"💳 Оплата {plan['name']}\n\n💰 {plan['rub']} ₽",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
