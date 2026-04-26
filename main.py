@@ -613,10 +613,6 @@ async def card_checker():
                 ) as cur:
                     invoices = await cur.fetchall()
 
-            if not invoices:
-                await asyncio.sleep(5)
-                continue
-
             for transaction_id, user_id, plan_id in invoices:
 
                 if transaction_id in processed:
@@ -631,17 +627,12 @@ async def card_checker():
                         }
                     ) as resp:
 
-                        text = await resp.text()
-
                         if resp.status != 200:
-                            logger.error(f"Platega HTTP error {resp.status}: {text}")
                             continue
 
                         data = await resp.json()
 
                     status = str(data.get("status", "")).upper()
-
-                    logger.info(f"PLATEGA CHECK {transaction_id}: {status}")
 
                     if status not in ("CONFIRMED", "SUCCESS", "PAID"):
                         continue
@@ -650,6 +641,7 @@ async def card_checker():
 
                     days = PLANS[plan_id]["days"]
 
+                    # 🔥 только начисление
                     await extend_user(user_id, days)
 
                     async with aiosqlite.connect(DB_NAME) as db:
@@ -659,18 +651,12 @@ async def card_checker():
                         )
                         await db.commit()
 
-                    # 🔥 ВАЖНО: нормальная ссылка с сроком
-                    invite = await bot.create_chat_invite_link(
-                        chat_id=CHANNEL_ID,
-                        member_limit=1,
-                        expire_date=datetime.now(timezone.utc) + timedelta(minutes=10)
-                    )
-
+                    # 🔥 БЕЗ ССЫЛОК ВООБЩЕ
                     await bot.send_message(
                         user_id,
                         f"✅ Оплата подтверждена!\n\n"
                         f"🎉 Доступ активирован на {days} дн.\n"
-                        f"👇 Войти в канал:\n{invite.invite_link}"
+                        f"👉 Просто нажми «Войти в канал» в боте"
                     )
 
                 except Exception as e:
@@ -679,7 +665,7 @@ async def card_checker():
         except Exception as e:
             logger.error(f"card_checker loop error: {e}")
 
-        await asyncio.sleep(5)
+        await asyncio.sleep(15)
 
 async def crypto_checker():
     while True:
