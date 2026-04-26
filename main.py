@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
 CHANNEL_ID = os.getenv("TELEGRAM_GROUP_ID")
-
+CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME")
 # Названия переменных точно как на твоем скриншоте
 PAYMENT_TOKEN = os.getenv("PLATEGA_API_KEY") 
 MERCHANT_ID = os.getenv("PLATEGA_MERCHANT_ID")
