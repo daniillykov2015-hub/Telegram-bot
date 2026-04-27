@@ -446,7 +446,19 @@ async def back(call: CallbackQuery):
 async def my_subscription(call: CallbackQuery):
     user = await get_user(call.from_user.id)
 
-    if not user or not user[1]:
+    if not user:
+        await call.message.edit_text(
+            "⛔ Пользователь не найден",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
+            ])
+        )
+        await call.answer()
+        return
+
+    expiry_str = user[1]
+
+    if not expiry_str:
         await call.message.edit_text(
             "⛔ У тебя нет активной подписки",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -456,25 +468,36 @@ async def my_subscription(call: CallbackQuery):
         await call.answer()
         return
 
-    expiry = datetime.fromisoformat(user[1]).replace(tzinfo=timezone.utc)
+    expiry = datetime.fromisoformat(expiry_str)
+
+    # если нет timezone — добавляем
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=timezone.utc)
+
     now = datetime.now(timezone.utc)
     remaining = expiry - now
 
-    days = remaining.days
-    hours = remaining.seconds // 3600
-    minutes = (remaining.seconds % 3600) // 60
+    if remaining.total_seconds() <= 0:
+        text = "⛔ Подписка истекла"
+    else:
+        days = remaining.days
+        hours = remaining.seconds // 3600
+        minutes = (remaining.seconds % 3600) // 60
+
+        text = (
+            "⏳ <b>Подписка активна</b>\n\n"
+            f"📅 Осталось: <b>{days} дн. {hours} ч. {minutes} мин.</b>\n"
+            f"📆 До: <b>{expiry.strftime('%Y-%m-%d %H:%M UTC')}</b>"
+        )
 
     await call.message.edit_text(
-        (
-            "⏳ <b>Подписка активна</b>\n\n"
-            f"Осталось: <b>{days} дн. {hours} ч. {minutes} мин.</b>\n"
-            f"До: <b>{expiry.strftime('%Y-%m-%d %H:%M UTC')}</b>"
-        ),
+        text,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
         ]),
         parse_mode="HTML"
     )
+
     await call.answer()
 # --- PLATEGA ---
 @router.callback_query(F.data.startswith("card_confirm:"))
