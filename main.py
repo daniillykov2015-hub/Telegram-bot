@@ -31,6 +31,10 @@ CHANNEL_ID = os.getenv("TELEGRAM_GROUP_ID")
 # Названия переменных точно как на твоем скриншоте
 PAYMENT_TOKEN = os.getenv("PLATEGA_API_KEY") 
 MERCHANT_ID = os.getenv("PLATEGA_MERCHANT_ID")
+# Твой личный ID (цифрами), чтобы бот знал, куда писать
+ADMIN_ID = os.getenv("ADMIN_ID") 
+if ADMIN_ID:
+    ADMIN_ID = int(ADMIN_ID)
 
 if not BOT_TOKEN or not CRYPTO_TOKEN or not CHANNEL_ID:
     raise ValueError("Missing environment variables!")
@@ -662,12 +666,13 @@ async def terms(call: CallbackQuery):
 
 # --- PAYMENTS & JOIN ---
 JOIN_LINK = "https://t.me/+ffk7dB_5zPhkMWFk"
-
+ADMIN_ID = os.getenv("ADMIN_ID")
+if ADMIN_ID:
+    ADMIN_ID = int(ADMIN_ID)
 
 @router.pre_checkout_query()
 async def pre_checkout(pre: PreCheckoutQuery):
     await pre.answer(ok=True)
-
 
 @router.message(F.successful_payment)
 async def success(message: Message):
@@ -690,6 +695,20 @@ async def success(message: Message):
         # 🎯 начисляем подписку
         await extend_user(message.from_user.id, days)
 
+        # 🔔 Уведомление администратору
+        if ADMIN_ID:
+            username = f"@{message.from_user.username}" if message.from_user.username else f"ID: {message.from_user.id}"
+            try:
+                await bot.send_message(
+                    ADMIN_ID,
+                    f"⭐️ <b>Новая оплата Stars!</b>\n\n"
+                    f"👤 Пользователь: {username}\n"
+                    f"📦 Тариф: {plan['name']}\n"
+                    f"🆔 ID: <code>{message.from_user.id}</code>"
+                )
+            except Exception as admin_err:
+                logging.error(f"Admin notification error: {admin_err}")
+
         # 🔥 ВАЖНО: выдаём ССЫЛКУ НА JOIN REQUEST
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(
@@ -711,14 +730,12 @@ async def success(message: Message):
 
     except Exception as e:
         logging.error(f"Stars success error: {e}")
-
         await message.answer(
             "❌ Ошибка обработки оплаты. Напишите в поддержку.",
             parse_mode="HTML"
         )
 # --- BACKGROUND TASKS ---
 JOIN_LINK = "https://t.me/+ffk7dB_5zPhkMWFk"
-
 
 async def card_checker():
     while True:
@@ -730,7 +747,6 @@ async def card_checker():
                     invoices = await cur.fetchall()
 
             for transaction_id, user_id, plan_id in invoices:
-
                 try:
                     async with http_session.get(
                         f"https://app.platega.io/transaction/{transaction_id}",
@@ -766,6 +782,19 @@ async def card_checker():
                     # 🎯 начисляем подписку
                     await extend_user(user_id, days)
 
+                    # 🔔 Уведомление администратору (тебе)
+                    if ADMIN_ID:
+                        try:
+                            await bot.send_message(
+                                ADMIN_ID,
+                                f"💳 <b>Оплата КАРТОЙ!</b>\n\n"
+                                f"👤 User ID: <code>{user_id}</code>\n"
+                                f"📦 Тариф: {PLANS[plan_id]['name']}\n"
+                                f"📑 ID Транзакции: <code>{transaction_id}</code>"
+                            )
+                        except Exception as admin_err:
+                            logger.error(f"Admin notification error (Card): {admin_err}")
+
                     # 🔥 выдаём доступ через JOIN REQUEST
                     kb = InlineKeyboardMarkup(inline_keyboard=[
                         [InlineKeyboardButton(
@@ -794,8 +823,9 @@ async def card_checker():
 
         await asyncio.sleep(5)
 
-JOIN_LINK = "https://t.me/+ffk7dB_5zPhkMWFk"
+# --- КРИПТО-ЧЕКЕР (CryptoBot) ---
 
+JOIN_LINK = "https://t.me/+ffk7dB_5zPhkMWFk"
 
 async def crypto_checker():
     while True:
@@ -807,7 +837,6 @@ async def crypto_checker():
                     invoices = await cur.fetchall()
 
             for inv_id, user_id, plan_id in invoices:
-
                 try:
                     async with http_session.get(
                         f"https://pay.crypt.bot/api/getInvoices?invoice_ids={inv_id}",
@@ -827,7 +856,7 @@ async def crypto_checker():
 
                     days = PLANS[plan_id]["days"]
 
-                    # 🎯 начисляем подписку
+                    # 🎯 начисляем подписку в БД
                     await extend_user(user_id, days)
 
                     async with aiosqlite.connect(DB_NAME) as db:
@@ -836,6 +865,19 @@ async def crypto_checker():
                             (inv_id,)
                         )
                         await db.commit()
+
+                    # 🔔 Уведомление администратору (тебе)
+                    if ADMIN_ID:
+                        try:
+                            await bot.send_message(
+                                ADMIN_ID,
+                                f"💰 <b>Оплата CRYPTO!</b>\n\n"
+                                f"👤 User ID: <code>{user_id}</code>\n"
+                                f"📦 Тариф: {PLANS[plan_id]['name']}\n"
+                                f"🆔 Invoice ID: <code>{inv_id}</code>"
+                            )
+                        except Exception as admin_err:
+                            logger.error(f"Admin notification error (Crypto): {admin_err}")
 
                     # 🔥 выдаём доступ через JOIN REQUEST
                     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -863,6 +905,7 @@ async def crypto_checker():
         except Exception as e:
             logger.error(f"Crypto checker loop error: {e}")
 
+        # Для крипты 20 секунд — отличный интервал, чтобы не спамить API
         await asyncio.sleep(20)
 
 async def check_subscriptions():
