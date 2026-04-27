@@ -291,7 +291,6 @@ CREATE TABLE IF NOT EXISTS invite_links (
 def main_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            # Добавляем новую кнопку для Карт и СБП в самый верх
             InlineKeyboardButton(text="💳 Карта / СБП (₽)", callback_data="pay_card"),
         ],
         [
@@ -302,9 +301,11 @@ def main_menu_kb():
             InlineKeyboardButton(text="👥 Реферальная система", callback_data="ref"),
             InlineKeyboardButton(text="💬 Поддержка", url="https://t.me/mistybibi"),
         ],
-        [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
+        [
+            InlineKeyboardButton(text="⏳ Подписка", callback_data="my_sub"),
+            InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")
+        ]
     ])
-
 async def get_or_create_invite(user_id: int, days: int):
     async with aiosqlite.connect(DB_NAME) as db:
 
@@ -440,6 +441,41 @@ async def start(message: Message):
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=main_menu_kb())
+
+@router.callback_query(F.data == "my_sub")
+async def my_subscription(call: CallbackQuery):
+    user = await get_user(call.from_user.id)
+
+    if not user or not user[1]:
+        await call.message.edit_text(
+            "⛔ У тебя нет активной подписки",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
+            ])
+        )
+        await call.answer()
+        return
+
+    expiry = datetime.fromisoformat(user[1]).replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    remaining = expiry - now
+
+    days = remaining.days
+    hours = remaining.seconds // 3600
+    minutes = (remaining.seconds % 3600) // 60
+
+    await call.message.edit_text(
+        (
+            "⏳ <b>Подписка активна</b>\n\n"
+            f"Осталось: <b>{days} дн. {hours} ч. {minutes} мин.</b>\n"
+            f"До: <b>{expiry.strftime('%Y-%m-%d %H:%M UTC')}</b>"
+        ),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
+        ]),
+        parse_mode="HTML"
+    )
+    await call.answer()
 # --- PLATEGA ---
 @router.callback_query(F.data.startswith("card_confirm:"))
 async def card_confirm(call: CallbackQuery):
