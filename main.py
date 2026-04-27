@@ -212,13 +212,15 @@ async def get_user(user_id):
 
 async def extend_user(user_id, days, is_bonus=False):
     async with aiosqlite.connect(DB_NAME) as db:
+
+        # 📌 берём текущие данные
         async with db.execute(
             "SELECT expiry, referrer FROM users WHERE user_id=?",
             (user_id,)
         ) as cur:
             row = await cur.fetchone()
 
-        # 📅 считаем новую дату
+        # 📅 база времени
         if row and row[0]:
             current = datetime.fromisoformat(row[0]).replace(tzinfo=timezone.utc)
             base = max(datetime.now(timezone.utc), current)
@@ -227,16 +229,20 @@ async def extend_user(user_id, days, is_bonus=False):
 
         new_expiry = base + timedelta(days=days)
 
+        # 🔒 атомарное обновление подписки
         await db.execute("""
-        INSERT INTO users (user_id, expiry)
-        VALUES (?, ?)
-        ON CONFLICT(user_id) DO UPDATE SET expiry=excluded.expiry
+            INSERT INTO users (user_id, expiry)
+            VALUES (?, ?)
+            ON CONFLICT(user_id)
+            DO UPDATE SET expiry=excluded.expiry
         """, (user_id, new_expiry.isoformat()))
 
-        # 🎁 РЕФЕРАЛКА
+        # 🎁 рефералка (только если не бонус)
         if not is_bonus and row and row[1]:
+
             ref_id = row[1]
 
+            # проверяем активность реферера
             async with db.execute(
                 "SELECT expiry FROM users WHERE user_id=?",
                 (ref_id,)
@@ -244,18 +250,22 @@ async def extend_user(user_id, days, is_bonus=False):
                 ref_row = await cur.fetchone()
 
             if ref_row and ref_row[0]:
+
                 ref_expiry = datetime.fromisoformat(ref_row[0]).replace(tzinfo=timezone.utc)
 
                 if ref_expiry > datetime.now(timezone.utc):
+
+                    # 🔒 атомарное обновление рефералки
                     await db.execute("""
-                        UPDATE users 
+                        UPDATE users
                         SET ref_count = ref_count + 1,
                             bonus_days = bonus_days + 7
                         WHERE user_id = ?
                     """, (ref_id,))
+
                     await db.commit()
 
-                    # продлеваем рефереру
+                    # 🎁 даём бонус отдельно
                     await extend_user(ref_id, 7, is_bonus=True)
 
                     try:
