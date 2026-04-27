@@ -592,7 +592,8 @@ async def pre_checkout(pre: PreCheckoutQuery):
 async def success(message: Message):
     payload = message.successful_payment.invoice_payload
 
-    if payload.startswith("stars_") or payload.startswith("card_"):
+    if not payload.startswith("stars_"):
+    return
         plan_id = payload.split("_")[1]
         days = PLANS[plan_id]["days"]
 
