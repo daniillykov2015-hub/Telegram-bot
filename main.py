@@ -304,6 +304,53 @@ def main_menu_kb():
         ],
         [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
     ])
+
+async def get_or_create_invite(user_id: int, days: int):
+    async with aiosqlite.connect(DB_NAME) as db:
+
+        # 1. проверяем существующую ссылку
+        async with db.execute(
+            "SELECT invite_link, expire_at FROM invite_links WHERE user_id=?",
+            (user_id,)
+        ) as cur:
+            row = await cur.fetchone()
+
+        now = datetime.now(timezone.utc)
+
+        # 2. если ссылка есть и ещё жива — используем её
+        if row:
+            link, expire_at = row
+
+            if expire_at:
+                exp = datetime.fromisoformat(expire_at)
+
+                if exp > now:
+                    return link
+
+        # 3. иначе создаём новую ссылку
+        expire_time = now + timedelta(days=days)
+
+        invite = await bot.create_chat_invite_link(
+            chat_id=CHANNEL_ID,
+            member_limit=0,  # важно: без ограничения
+            expire_date=int(expire_time.timestamp())
+        )
+
+        link = invite.invite_link
+
+        # 4. сохраняем в БД
+        await db.execute("""
+            INSERT INTO invite_links (user_id, invite_link, expire_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id)
+            DO UPDATE SET
+                invite_link=excluded.invite_link,
+                expire_at=excluded.expire_at
+        """, (user_id, link, expire_time.isoformat()))
+
+        await db.commit()
+
+        return link
 # ================== HANDLERS ==================
 # ================== STARS PAYMENT (из main 2) ==================
 
