@@ -721,10 +721,6 @@ async def card_checker():
                 ) as cur:
                     invoices = await cur.fetchall()
 
-            if not invoices:
-                await asyncio.sleep(5)
-                continue
-
             for transaction_id, user_id, plan_id in invoices:
 
                 try:
@@ -737,23 +733,20 @@ async def card_checker():
                     ) as resp:
 
                         if resp.status != 200:
-                            logger.error(f"Platega HTTP error {resp.status}")
                             continue
 
                         try:
                             data = await resp.json()
                         except Exception:
-                            logger.error("Platega invalid JSON")
                             continue
 
                     status = str(data.get("status", "")).upper()
-                    logger.info(f"PLATEGA CHECK {transaction_id}: {status}")
 
-                    # ❗ ждём оплату
+                    # ❗ только финальный статус оплаты
                     if status not in ("CONFIRMED", "SUCCESS", "PAID"):
                         continue
 
-                    # 🔒 защита от повторной обработки
+                    # 🔒 защита от дубля
                     async with aiosqlite.connect(DB_NAME) as db:
                         cursor = await db.execute(
                             "UPDATE card_invoices SET status='paid' WHERE payload=? AND status='pending'",
@@ -769,16 +762,28 @@ async def card_checker():
                     # 🎯 выдаём подписку
                     await extend_user(user_id, days)
 
-                    # 🚀 ВАЖНО: НЕ создаём инвайт вообще
-                    # доступ идёт через chat_join_request
+                    # 🔥 ВАЖНО: создаём реальный инвайт (без него входа НЕ будет)
+                    invite = await bot.create_chat_invite_link(
+                        chat_id=CHANNEL_ID,
+                        member_limit=1,
+                        expire_date=datetime.now(timezone.utc) + timedelta(days=1)
+                    )
+
+                    kb = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(
+                            text="📢 Войти в закрытый канал",
+                            url=invite.invite_link
+                        )]
+                    ])
 
                     await bot.send_message(
                         user_id,
                         (
                             f"✅ Оплата подтверждена!\n\n"
-                            f"🎉 Доступ активирован на <b>{days} дн.</b>\n\n"
-                            "👉 Просто нажмите «Вступить в канал» в Telegram — доступ откроется автоматически"
+                            f"🎉 Доступ активирован на <b>{days} дн.</b>\n"
+                            f"👇 Вход в канал по кнопке ниже:"
                         ),
+                        reply_markup=kb,
                         parse_mode="HTML"
                     )
 
@@ -802,7 +807,7 @@ async def crypto_checker():
             for inv_id, user_id, plan_id in invoices:
 
                 try:
-                    # 📡 проверка статуса оплаты
+                    # 📡 проверка оплаты
                     async with http_session.get(
                         f"https://pay.crypt.bot/api/getInvoices?invoice_ids={inv_id}",
                         headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN}
@@ -819,13 +824,12 @@ async def crypto_checker():
                     if status != "paid":
                         continue
 
-                    # 💎 план
                     days = PLANS[plan_id]["days"]
 
-                    # 🎯 начисляем подписку
+                    # 🎯 выдаём подписку
                     await extend_user(user_id, days)
 
-                    # 🔒 помечаем как оплачено
+                    # 🔒 фиксируем оплату (один раз)
                     async with aiosqlite.connect(DB_NAME) as db:
                         await db.execute(
                             "UPDATE crypto_invoices SET status='paid' WHERE invoice_id=?",
@@ -833,9 +837,12 @@ async def crypto_checker():
                         )
                         await db.commit()
 
-                    # 🔥 СТАБИЛЬНЫЙ ВХОД (БЕЗ ВРЕМЕННЫХ ИНВАЙТОВ)
+                    # 🚀 ВАЖНО: НЕ используем вечные ссылки
+                    # создаём короткий invite (без мусора)
                     invite = await bot.create_chat_invite_link(
-                        chat_id=CHANNEL_ID
+                        chat_id=CHANNEL_ID,
+                        member_limit=1,
+                        expire_date=datetime.now(timezone.utc) + timedelta(hours=24)
                     )
 
                     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -850,7 +857,7 @@ async def crypto_checker():
                         (
                             f"✅ Оплата через Crypto подтверждена!\n\n"
                             f"🎉 Доступ активирован на <b>{days} дн.</b>\n"
-                            f"👇 Вход в канал по кнопке ниже:"
+                            f"👇 Нажмите кнопку для входа:"
                         ),
                         reply_markup=kb,
                         parse_mode="HTML"
