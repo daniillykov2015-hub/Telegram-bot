@@ -49,6 +49,31 @@ dp.include_router(router)
 
 http_session = None
 tasks = []
+
+async def notify_admin(user_id: int, plan_name: str, method: str, extra: str = ""):
+    if not ADMIN_ID:
+        return
+
+    try:
+        user = await bot.get_chat(user_id)
+
+        username = f"@{user.username}" if user.username else "нет username"
+
+        text = (
+            "💰 <b>НОВАЯ ОПЛАТА</b>\n\n"
+            f"👤 Пользователь: {username}\n"
+            f"🆔 ID: <code>{user_id}</code>\n"
+            f"📦 Тариф: {plan_name}\n"
+            f"💳 Способ: {method}\n"
+        )
+
+        if extra:
+            text += f"\n{extra}"
+
+        await bot.send_message(ADMIN_ID, text)
+
+    except Exception as e:
+        logging.error(f"notify_admin error: {e}")
 # ================== TEXTS ==================
 MAIN_TEXT = (
     "👋 Привет, я Ева и это мой закрытый канал\n\n"
@@ -695,21 +720,18 @@ async def success(message: Message):
         # 🎯 начисляем подписку
         await extend_user(message.from_user.id, days)
 
-        # 🔔 Уведомление администратору
+        # 🔔 УВЕДОМЛЕНИЕ АДМИНУ (ЕДИНЫЙ ФОРМАТ)
         if ADMIN_ID:
-            username = f"@{message.from_user.username}" if message.from_user.username else f"ID: {message.from_user.id}"
             try:
-                await bot.send_message(
-                    ADMIN_ID,
-                    f"⭐️ <b>Новая оплата Stars!</b>\n\n"
-                    f"👤 Пользователь: {username}\n"
-                    f"📦 Тариф: {plan['name']}\n"
-                    f"🆔 ID: <code>{message.from_user.id}</code>"
+                await notify_admin(
+                    user_id=message.from_user.id,
+                    plan_name=plan["name"],
+                    method="Stars ⭐"
                 )
             except Exception as admin_err:
                 logging.error(f"Admin notification error: {admin_err}")
 
-        # 🔥 ВАЖНО: выдаём ССЫЛКУ НА JOIN REQUEST
+        # 🔥 выдаём ссылку
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(
                 text="📢 Вступить в закрытый канал",
@@ -735,6 +757,7 @@ async def success(message: Message):
             parse_mode="HTML"
         )
 # --- BACKGROUND TASKS ---
+
 JOIN_LINK = "https://t.me/+ffk7dB_5zPhkMWFk"
 
 async def card_checker():
@@ -782,20 +805,19 @@ async def card_checker():
                     # 🎯 начисляем подписку
                     await extend_user(user_id, days)
 
-                    # 🔔 Уведомление администратору (тебе)
+                    # 🔔 УВЕДОМЛЕНИЕ АДМИНУ (ИСПРАВЛЕНО)
                     if ADMIN_ID:
                         try:
-                            await bot.send_message(
-                                ADMIN_ID,
-                                f"💳 <b>Оплата КАРТОЙ!</b>\n\n"
-                                f"👤 User ID: <code>{user_id}</code>\n"
-                                f"📦 Тариф: {PLANS[plan_id]['name']}\n"
-                                f"📑 ID Транзакции: <code>{transaction_id}</code>"
+                            await notify_admin(
+                                user_id=user_id,
+                                plan_name=PLANS[plan_id]["name"],
+                                method="Card / SBP 💳",
+                                extra=f"🔗 Tx: <code>{transaction_id}</code>"
                             )
                         except Exception as admin_err:
                             logger.error(f"Admin notification error (Card): {admin_err}")
 
-                    # 🔥 выдаём доступ через JOIN REQUEST
+                    # 🔥 выдаём доступ
                     kb = InlineKeyboardMarkup(inline_keyboard=[
                         [InlineKeyboardButton(
                             text="📢 Вступить в закрытый канал",
@@ -822,7 +844,6 @@ async def card_checker():
             logger.error(f"Card checker loop error: {e}")
 
         await asyncio.sleep(5)
-
 # --- КРИПТО-ЧЕКЕР (CryptoBot) ---
 
 JOIN_LINK = "https://t.me/+ffk7dB_5zPhkMWFk"
@@ -856,7 +877,7 @@ async def crypto_checker():
 
                     days = PLANS[plan_id]["days"]
 
-                    # 🎯 начисляем подписку в БД
+                    # 🎯 начисляем подписку
                     await extend_user(user_id, days)
 
                     async with aiosqlite.connect(DB_NAME) as db:
@@ -866,20 +887,19 @@ async def crypto_checker():
                         )
                         await db.commit()
 
-                    # 🔔 Уведомление администратору (тебе)
+                    # 🔔 УВЕДОМЛЕНИЕ АДМИНУ (ИСПРАВЛЕНО)
                     if ADMIN_ID:
                         try:
-                            await bot.send_message(
-                                ADMIN_ID,
-                                f"💰 <b>Оплата CRYPTO!</b>\n\n"
-                                f"👤 User ID: <code>{user_id}</code>\n"
-                                f"📦 Тариф: {PLANS[plan_id]['name']}\n"
-                                f"🆔 Invoice ID: <code>{inv_id}</code>"
+                            await notify_admin(
+                                user_id=user_id,
+                                plan_name=PLANS[plan_id]["name"],
+                                method="Crypto 💰",
+                                extra=f"🆔 Invoice: <code>{inv_id}</code>"
                             )
                         except Exception as admin_err:
                             logger.error(f"Admin notification error (Crypto): {admin_err}")
 
-                    # 🔥 выдаём доступ через JOIN REQUEST
+                    # 🔥 выдаём доступ пользователю
                     kb = InlineKeyboardMarkup(inline_keyboard=[
                         [InlineKeyboardButton(
                             text="📢 Вступить в закрытый канал",
@@ -905,7 +925,6 @@ async def crypto_checker():
         except Exception as e:
             logger.error(f"Crypto checker loop error: {e}")
 
-        # Для крипты 20 секунд — отличный интервал, чтобы не спамить API
         await asyncio.sleep(20)
 
 async def check_subscriptions():
