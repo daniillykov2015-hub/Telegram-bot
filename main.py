@@ -764,16 +764,8 @@ async def card_checker():
 
                     await extend_user(user_id, days)
 
-                    # 🔥 ВАЖНО: НИКАКИХ ссылок
-                    await bot.send_message(
-                        user_id,
-                        (
-                            f"✅ Оплата подтверждена!\n\n"
-                            f"🎉 Доступ активирован на <b>{days} дн.</b>\n\n"
-                            "👉 Просто нажмите «Вступить в канал» в Telegram — доступ откроется автоматически"
-                        ),
-                        parse_mode="HTML"
-                    )
+                    # 🔥 ЕДИНЫЙ ВХОД (как Stars / Crypto)
+                    await send_access(user_id, days)
 
                 except Exception as e:
                     logger.error(f"card_checker inner error: {e}")
@@ -825,18 +817,8 @@ async def crypto_checker():
                         )
                         await db.commit()
 
-                    # 🚀 ВАЖНО: убираем любые одноразовые ссылки
-                    # доступ только через join request (единая система)
-
-                    await bot.send_message(
-                        user_id,
-                        (
-                            f"✅ Оплата через Crypto подтверждена!\n\n"
-                            f"🎉 Доступ активирован на <b>{days} дн.</b>\n\n"
-                            "👉 Просто нажмите «Вступить в канал» в Telegram — доступ откроется автоматически"
-                        ),
-                        parse_mode="HTML"
-                    )
+                    # 🚀 ЕДИНЫЙ ВХОД (как Card / Stars)
+                    await send_access(user_id, days)
 
                 except Exception as e:
                     logging.error(f"Crypto inner error: {e}")
