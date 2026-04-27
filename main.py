@@ -654,8 +654,6 @@ async def join(req: ChatJoinRequest):
 # --- BACKGROUND TASKS ---
 
 async def card_checker():
-    processed = set()
-
     while True:
         try:
             async with aiosqlite.connect(DB_NAME) as db:
@@ -669,9 +667,6 @@ async def card_checker():
                 continue
 
             for transaction_id, user_id, plan_id in invoices:
-
-                if transaction_id in processed:
-                    continue
 
                 try:
                     async with http_session.get(
@@ -698,32 +693,34 @@ async def card_checker():
 
                     logger.info(f"PLATEGA CHECK {transaction_id}: {status}")
 
+                    # ❗ не финальный статус
                     if status not in ("CONFIRMED", "SUCCESS", "PAID"):
                         continue
 
-                    processed.add(transaction_id)
-
-                    days = PLANS[plan_id]["days"]
-
-                    # 1. начисляем подписку
-                    await extend_user(user_id, days)
-
-                    # 2. обновляем статус оплаты
+                    # 🔒 атомарно помечаем как оплачено
                     async with aiosqlite.connect(DB_NAME) as db:
-                        await db.execute(
-                            "UPDATE card_invoices SET status='paid' WHERE payload=?",
+                        cursor = await db.execute(
+                            "UPDATE card_invoices SET status='paid' WHERE payload=? AND status='pending'",
                             (transaction_id,)
                         )
                         await db.commit()
 
-                    # 3. создаём invite link в приватный канал
+                    # ❗ если уже обработан — выходим
+                    if cursor.rowcount == 0:
+                        continue
+
+                    days = PLANS[plan_id]["days"]
+
+                    # 🎯 начисляем подписку
+                    await extend_user(user_id, days)
+
+                    # 💳 создаём invite link
                     invite = await bot.create_chat_invite_link(
                         chat_id=CHANNEL_ID,
                         member_limit=1,
                         expire_date=datetime.now(timezone.utc) + timedelta(days=days)
                     )
 
-                    # 4. отправляем доступ пользователю
                     kb = InlineKeyboardMarkup(inline_keyboard=[
                         [InlineKeyboardButton(
                             text="📢 Войти в закрытый канал",
