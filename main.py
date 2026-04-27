@@ -482,31 +482,26 @@ async def card_confirm(call: CallbackQuery):
                 )
                 await db.commit()
 
-        # 4. отправляем пользователю актуальную ссылку
-# 🔒 убираем старые кнопки (чтобы не было повторных нажатий)
-await call.message.edit_reply_markup(reply_markup=None)
+        # 4. UX БЛОК (ВАЖНО — ОН ВНУТРИ TRY)
+        await call.message.edit_reply_markup(reply_markup=None)
+        await call.answer("⏳ Создаём платёж...")
 
-# ⏳ мгновенный отклик пользователю
-await call.answer("⏳ Создаём платёж...")
+        await call.message.edit_text(
+            "⏳ <b>Готовим платёж...</b>\n\n"
+            "Пожалуйста, подождите несколько секунд",
+            parse_mode="HTML"
+        )
 
-# ⏳ промежуточный экран (UX ожидания)
-await call.message.edit_text(
-    "⏳ <b>Готовим платёж...</b>\n\n"
-    "Пожалуйста, подождите несколько секунд",
-    parse_mode="HTML"
-)
-
-# 💳 финальный экран с оплатой
-await call.message.edit_text(
-    f"💳 <b>Оплата {plan['name']}</b>\n\n"
-    f"💰 Сумма: <b>{plan['rub']} ₽</b>\n\n"
-    "👇 Нажмите кнопку ниже для оплаты",
-    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💸 Оплатить", url=pay_url)],
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="pay_card")]
-    ]),
-    parse_mode="HTML"
-)
+        await call.message.edit_text(
+            f"💳 <b>Оплата {plan['name']}</b>\n\n"
+            f"💰 Сумма: <b>{plan['rub']} ₽</b>\n\n"
+            "👇 Нажмите кнопку ниже для оплаты",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="💸 Оплатить", url=pay_url)],
+                [InlineKeyboardButton(text="⬅ Назад", callback_data="pay_card")]
+            ]),
+            parse_mode="HTML"
+        )
 
     except Exception as e:
         logger.exception(f"PLATEGA ERROR: {e}")
