@@ -661,6 +661,8 @@ async def terms(call: CallbackQuery):
     await call.answer()
 
 # --- PAYMENTS & JOIN ---
+JOIN_LINK = "https://t.me/+ffk7dB_5zPhkMWFk"
+
 @router.pre_checkout_query()
 async def pre_checkout(pre: PreCheckoutQuery):
     await pre.answer(ok=True)
@@ -668,34 +670,39 @@ async def pre_checkout(pre: PreCheckoutQuery):
 
 @router.message(F.successful_payment)
 async def success(message: Message):
-    payload = message.successful_payment.invoice_payload
-
-    # 💳 только Stars
-    if not payload.startswith("stars_"):
-        return
-
-    plan_id = payload.split("_")[1]
-    plan = PLANS.get(plan_id)
-
-    if not plan:
-        await message.answer("❌ Тариф не найден")
-        return
-
-    days = plan["days"]
-
-    # 🎯 начисляем подписку
-    await extend_user(message.from_user.id, days)
-
     try:
-        # 🚀 ВАЖНО: НЕ создаём инвайт ссылку вообще
-        # используем единый механизм join request (как Card/Crypto)
+        payload = message.successful_payment.invoice_payload
+
+        # 💳 только Stars
+        if not payload.startswith("stars_"):
+            return
+
+        plan_id = payload.split("_")[1]
+        plan = PLANS.get(plan_id)
+
+        if not plan:
+            await message.answer("❌ Тариф не найден")
+            return
+
+        days = plan["days"]
+
+        # 🎯 начисляем подписку
+        await extend_user(message.from_user.id, days)
+
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(
+                text="📢 Войти в закрытый канал",
+                url=JOIN_LINK
+            )]
+        ])
 
         await message.answer(
             (
                 f"✅ Оплата прошла успешно!\n\n"
                 f"🎉 Доступ активирован на <b>{days} дн.</b>\n\n"
-                "👉 Просто нажмите «Вступить в канал» в Telegram — доступ откроется автоматически"
+                "👉 Нажмите кнопку ниже и отправьте заявку на вступление"
             ),
+            reply_markup=kb,
             parse_mode="HTML"
         )
 
@@ -703,10 +710,7 @@ async def success(message: Message):
         logging.error(f"Stars success error: {e}")
 
         await message.answer(
-            (
-                f"✅ Оплата прошла успешно!\n\n"
-                f"🎉 Доступ активирован на <b>{days} дн.</b>"
-            ),
+            "✅ Оплата прошла успешно!\n🎉 Доступ активирован.",
             parse_mode="HTML"
         )
 
@@ -742,11 +746,10 @@ async def card_checker():
 
                     status = str(data.get("status", "")).upper()
 
-                    # ❗ только финальный статус оплаты
+                    # ✅ ждём оплату
                     if status not in ("CONFIRMED", "SUCCESS", "PAID"):
                         continue
 
-                    # 🔒 защита от дубля
                     async with aiosqlite.connect(DB_NAME) as db:
                         cursor = await db.execute(
                             "UPDATE card_invoices SET status='paid' WHERE payload=? AND status='pending'",
@@ -759,31 +762,16 @@ async def card_checker():
 
                     days = PLANS[plan_id]["days"]
 
-                    # 🎯 выдаём подписку
                     await extend_user(user_id, days)
 
-                    # 🔥 ВАЖНО: создаём реальный инвайт (без него входа НЕ будет)
-                    invite = await bot.create_chat_invite_link(
-                        chat_id=CHANNEL_ID,
-                        member_limit=1,
-                        expire_date=datetime.now(timezone.utc) + timedelta(days=1)
-                    )
-
-                    kb = InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(
-                            text="📢 Войти в закрытый канал",
-                            url=invite.invite_link
-                        )]
-                    ])
-
+                    # 🔥 ВАЖНО: НИКАКИХ ссылок
                     await bot.send_message(
                         user_id,
                         (
                             f"✅ Оплата подтверждена!\n\n"
-                            f"🎉 Доступ активирован на <b>{days} дн.</b>\n"
-                            f"👇 Вход в канал по кнопке ниже:"
+                            f"🎉 Доступ активирован на <b>{days} дн.</b>\n\n"
+                            "👉 Просто нажмите «Вступить в канал» в Telegram — доступ откроется автоматически"
                         ),
-                        reply_markup=kb,
                         parse_mode="HTML"
                     )
 
@@ -829,7 +817,7 @@ async def crypto_checker():
                     # 🎯 выдаём подписку
                     await extend_user(user_id, days)
 
-                    # 🔒 фиксируем оплату (один раз)
+                    # 🔒 фиксируем оплату
                     async with aiosqlite.connect(DB_NAME) as db:
                         await db.execute(
                             "UPDATE crypto_invoices SET status='paid' WHERE invoice_id=?",
@@ -837,29 +825,16 @@ async def crypto_checker():
                         )
                         await db.commit()
 
-                    # 🚀 ВАЖНО: НЕ используем вечные ссылки
-                    # создаём короткий invite (без мусора)
-                    invite = await bot.create_chat_invite_link(
-                        chat_id=CHANNEL_ID,
-                        member_limit=1,
-                        expire_date=datetime.now(timezone.utc) + timedelta(hours=24)
-                    )
-
-                    kb = InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(
-                            text="📢 Войти в закрытый канал",
-                            url=invite.invite_link
-                        )]
-                    ])
+                    # 🚀 ВАЖНО: убираем любые одноразовые ссылки
+                    # доступ только через join request (единая система)
 
                     await bot.send_message(
                         user_id,
                         (
                             f"✅ Оплата через Crypto подтверждена!\n\n"
-                            f"🎉 Доступ активирован на <b>{days} дн.</b>\n"
-                            f"👇 Нажмите кнопку для входа:"
+                            f"🎉 Доступ активирован на <b>{days} дн.</b>\n\n"
+                            "👉 Просто нажмите «Вступить в канал» в Telegram — доступ откроется автоматически"
                         ),
-                        reply_markup=kb,
                         parse_mode="HTML"
                     )
 
