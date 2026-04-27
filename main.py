@@ -600,7 +600,7 @@ async def success(message: Message):
 
     await extend_user(message.from_user.id, days)
 
-        try:
+    try:
             # 2. Делаем invite link НА СРОК ПОДПИСКИ
             invite = await bot.create_chat_invite_link(
                 chat_id=CHANNEL_ID,
