@@ -663,6 +663,7 @@ async def terms(call: CallbackQuery):
 # --- PAYMENTS & JOIN ---
 JOIN_LINK = "https://t.me/+ffk7dB_5zPhkMWFk"
 
+
 @router.pre_checkout_query()
 async def pre_checkout(pre: PreCheckoutQuery):
     await pre.answer(ok=True)
@@ -689,33 +690,18 @@ async def success(message: Message):
         # 🎯 начисляем подписку
         await extend_user(message.from_user.id, days)
 
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(
-                text="📢 Войти в закрытый канал",
-                url=JOIN_LINK
-            )]
-        ])
-
-        await message.answer(
-            (
-                f"✅ Оплата прошла успешно!\n\n"
-                f"🎉 Доступ активирован на <b>{days} дн.</b>\n\n"
-                "👉 Нажмите кнопку ниже и отправьте заявку на вступление"
-            ),
-            reply_markup=kb,
-            parse_mode="HTML"
-        )
+        # 🚀 ЕДИНЫЙ ВХОД (как Card / Crypto)
+        await send_access(message.from_user.id, days)
 
     except Exception as e:
         logging.error(f"Stars success error: {e}")
 
         await message.answer(
-            "✅ Оплата прошла успешно!\n🎉 Доступ активирован.",
+            "❌ Ошибка обработки оплаты. Напишите в поддержку.",
             parse_mode="HTML"
         )
 
 # --- BACKGROUND TASKS ---
-
 async def card_checker():
     while True:
         try:
@@ -746,7 +732,7 @@ async def card_checker():
 
                     status = str(data.get("status", "")).upper()
 
-                    # ✅ ждём оплату
+                    # ✅ ждём финальную оплату
                     if status not in ("CONFIRMED", "SUCCESS", "PAID"):
                         continue
 
@@ -762,9 +748,10 @@ async def card_checker():
 
                     days = PLANS[plan_id]["days"]
 
+                    # 🎯 начисляем подписку
                     await extend_user(user_id, days)
 
-                    # 🔥 ЕДИНЫЙ ВХОД (как Stars / Crypto)
+                    # 🚀 ЕДИНЫЙ ВХОД (Stars / Crypto / Card)
                     await send_access(user_id, days)
 
                 except Exception as e:
@@ -800,7 +787,7 @@ async def crypto_checker():
 
                     status = items[0].get("status")
 
-                    # ❗ ждём только оплату
+                    # ❗ ждём оплату
                     if status != "paid":
                         continue
 
@@ -817,8 +804,24 @@ async def crypto_checker():
                         )
                         await db.commit()
 
-                    # 🚀 ЕДИНЫЙ ВХОД (как Card / Stars)
-                    await send_access(user_id, days)
+                    # 🔗 ЕДИНЫЙ ВХОД (как Stars / Card)
+                    kb = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(
+                            text="📢 Вступить в канал",
+                            url=JOIN_LINK
+                        )]
+                    ])
+
+                    await bot.send_message(
+                        user_id,
+                        (
+                            f"✅ Оплата через Crypto подтверждена!\n\n"
+                            f"🎉 Доступ активирован на <b>{days} дн.</b>\n\n"
+                            "👇 Нажмите кнопку и отправьте заявку на вступление"
+                        ),
+                        reply_markup=kb,
+                        parse_mode="HTML"
+                    )
 
                 except Exception as e:
                     logging.error(f"Crypto inner error: {e}")
