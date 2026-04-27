@@ -676,8 +676,6 @@ async def join(req: ChatJoinRequest):
 # --- BACKGROUND TASKS ---
 
 async def card_checker():
-    error_count = 0  # 👈 защита от спама API
-
     while True:
         try:
             async with aiosqlite.connect(DB_NAME) as db:
@@ -687,7 +685,7 @@ async def card_checker():
                     invoices = await cur.fetchall()
 
             if not invoices:
-                await asyncio.sleep(10)
+                await asyncio.sleep(5)
                 continue
 
             for transaction_id, user_id, plan_id in invoices:
@@ -705,17 +703,16 @@ async def card_checker():
 
                         if resp.status != 200:
                             logger.error(f"Platega HTTP error {resp.status}: {text}")
-                            error_count += 1
                             continue
 
                         try:
                             data = await resp.json()
                         except Exception:
                             logger.error(f"Platega invalid JSON: {text}")
-                            error_count += 1
                             continue
 
                     status = str(data.get("status", "")).upper()
+
                     logger.info(f"PLATEGA CHECK {transaction_id}: {status}")
 
                     # ❗ не финальный статус
@@ -730,15 +727,16 @@ async def card_checker():
                         )
                         await db.commit()
 
+                    # ❗ если уже обработан — выходим
                     if cursor.rowcount == 0:
                         continue
 
-                    error_count = 0  # ✅ успех — сбрасываем ошибки
-
                     days = PLANS[plan_id]["days"]
 
+                    # 🎯 начисляем подписку
                     await extend_user(user_id, days)
 
+                    # 💳 создаём invite link
                     invite = await bot.create_chat_invite_link(
                         chat_id=CHANNEL_ID,
                         member_limit=1,
@@ -762,18 +760,75 @@ async def card_checker():
                     )
 
                 except Exception as e:
-                    error_count += 1
                     logger.error(f"card_checker inner error: {e}")
 
         except Exception as e:
-            error_count += 1
             logger.error(f"card_checker loop error: {e}")
 
-        # ⏳ адаптивная пауза (анти-rate-limit)
-        sleep_time = 10 + (error_count * 5)
-        sleep_time = min(sleep_time, 60)
+        await asyncio.sleep(5)
 
-        await asyncio.sleep(sleep_time)
+async def crypto_checker():
+    while True:
+        try:
+            async with aiosqlite.connect(DB_NAME) as db:
+                async with db.execute(
+                    "SELECT invoice_id, user_id, plan_id FROM crypto_invoices WHERE status='pending'"
+                ) as cur:
+                    invoices = await cur.fetchall()
+
+            for inv_id, u_id, p_id in invoices:
+                async with http_session.get(
+                    f"https://pay.crypt.bot/api/getInvoices?invoice_ids={inv_id}",
+                    headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN}
+                ) as resp:
+                    data = await resp.json()
+
+                if data.get("ok") and data["result"]["items"][0]["status"] == "paid":
+
+                    # 1. начисляем подписку
+                    await extend_user(u_id, PLANS[p_id]["days"])
+
+                    # 2. помечаем как оплачено
+                    async with aiosqlite.connect(DB_NAME) as db:
+                        await db.execute(
+                            "UPDATE crypto_invoices SET status='paid' WHERE invoice_id=?",
+                            (inv_id,)
+                        )
+                        await db.commit()
+
+                    try:
+                        days = PLANS[p_id]["days"]
+
+                        # 3. создаём ссылку в канал (как у stars/card)
+                        invite = await bot.create_chat_invite_link(
+                            chat_id=CHANNEL_ID,
+                            member_limit=1,
+                            expire_date=datetime.now(timezone.utc) + timedelta(days=days)
+                        )
+
+                        kb = InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(
+                                text="📢 Войти в закрытый канал",
+                                url=invite.invite_link
+                            )]
+                        ])
+
+                        await bot.send_message(
+                            u_id,
+                            f"✅ Оплата через Crypto принята!\n\n"
+                            f"🎉 Доступ активирован на <b>{days} дн.</b>\n"
+                            f"👇 Вход по кнопке ниже:",
+                            reply_markup=kb,
+                            parse_mode="HTML"
+                        )
+
+                    except Exception as e:
+                        logging.error(f"Crypto success error: {e}")
+
+        except Exception as e:
+            logging.error(f"Crypto checker error: {e}")
+
+        await asyncio.sleep(20)
 
 async def check_subscriptions():
     while True:
