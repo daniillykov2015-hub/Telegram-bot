@@ -588,49 +588,53 @@ async def terms(call: CallbackQuery):
 async def pre_checkout(pre: PreCheckoutQuery):
     await pre.answer(ok=True)
 
+
 @router.message(F.successful_payment)
 async def success(message: Message):
     payload = message.successful_payment.invoice_payload
 
+    # обрабатываем только Stars
     if not payload.startswith("stars_"):
         return
 
     plan_id = payload.split("_")[1]
     days = PLANS[plan_id]["days"]
 
+    # начисляем подписку
     await extend_user(message.from_user.id, days)
 
     try:
-            # 2. Делаем invite link НА СРОК ПОДПИСКИ
-            invite = await bot.create_chat_invite_link(
-                chat_id=CHANNEL_ID,
-                member_limit=1,
-                expire_date=datetime.now(timezone.utc) + timedelta(days=days)
-            )
+        # создаём invite link
+        invite = await bot.create_chat_invite_link(
+            chat_id=CHANNEL_ID,
+            member_limit=1,
+            expire_date=datetime.now(timezone.utc) + timedelta(days=days)
+        )
 
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(
-                    text="📢 Войти в закрытый канал",
-                    url=invite.invite_link
-                )]
-            ])
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(
+                text="📢 Войти в закрытый канал",
+                url=invite.invite_link
+            )]
+        ])
 
-            await message.answer(
-                f"✅ Оплата прошла успешно!\n\n"
-                f"🎉 Доступ активирован на <b>{days} дн.</b>\n"
-                f"👇 Вход в канал по кнопке ниже:",
-                reply_markup=kb,
-                parse_mode="HTML"
-            )
+        await message.answer(
+            f"✅ Оплата прошла успешно!\n\n"
+            f"🎉 Доступ активирован на <b>{days} дн.</b>\n"
+            f"👇 Вход в канал по кнопке ниже:",
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
 
-        except Exception as e:
-            logging.error(f"Invite error: {e}")
+    except Exception as e:
+        logging.error(f"Invite error: {e}")
 
-            await message.answer(
-                f"✅ Оплата прошла успешно!\n\n"
-                f"🎉 Доступ активирован на <b>{days} дн.</b>",
-                parse_mode="HTML"
-            )
+        await message.answer(
+            f"✅ Оплата прошла успешно!\n\n"
+            f"🎉 Доступ активирован на <b>{days} дн.</b>",
+            parse_mode="HTML"
+        )
+
 
 @router.chat_join_request()
 async def join(req: ChatJoinRequest):
