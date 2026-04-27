@@ -674,7 +674,7 @@ async def success(message: Message):
     try:
         payload = message.successful_payment.invoice_payload
 
-        # 💳 только Stars
+        # ⭐ только Stars
         if not payload.startswith("stars_"):
             return
 
@@ -690,8 +690,24 @@ async def success(message: Message):
         # 🎯 начисляем подписку
         await extend_user(message.from_user.id, days)
 
-        # 🚀 ЕДИНЫЙ ВХОД (как Card / Crypto)
-        await send_access(message.from_user.id, days)
+        # 🔥 ВАЖНО: выдаём ССЫЛКУ НА JOIN REQUEST
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(
+                text="📢 Вступить в закрытый канал",
+                url=JOIN_LINK
+            )]
+        ])
+
+        await message.answer(
+            (
+                "✅ Оплата прошла успешно!\n\n"
+                f"🎉 Доступ активирован на <b>{days} дн.</b>\n\n"
+                "👇 Нажмите кнопку ниже и отправьте заявку на вступление\n"
+                "👤 После этого администратор подтвердит доступ"
+            ),
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
 
     except Exception as e:
         logging.error(f"Stars success error: {e}")
@@ -700,8 +716,10 @@ async def success(message: Message):
             "❌ Ошибка обработки оплаты. Напишите в поддержку.",
             parse_mode="HTML"
         )
-
 # --- BACKGROUND TASKS ---
+JOIN_LINK = "https://t.me/+ffk7dB_5zPhkMWFk"
+
+
 async def card_checker():
     while True:
         try:
@@ -725,14 +743,11 @@ async def card_checker():
                         if resp.status != 200:
                             continue
 
-                        try:
-                            data = await resp.json()
-                        except Exception:
-                            continue
+                        data = await resp.json()
 
                     status = str(data.get("status", "")).upper()
 
-                    # ✅ ждём финальную оплату
+                    # ⛔ ждём оплату
                     if status not in ("CONFIRMED", "SUCCESS", "PAID"):
                         continue
 
@@ -751,16 +766,36 @@ async def card_checker():
                     # 🎯 начисляем подписку
                     await extend_user(user_id, days)
 
-                    # 🚀 ЕДИНЫЙ ВХОД (Stars / Crypto / Card)
-                    await send_access(user_id, days)
+                    # 🔥 выдаём доступ через JOIN REQUEST
+                    kb = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(
+                            text="📢 Вступить в закрытый канал",
+                            url=JOIN_LINK
+                        )]
+                    ])
+
+                    await bot.send_message(
+                        user_id,
+                        (
+                            "✅ Оплата прошла успешно!\n\n"
+                            f"🎉 Доступ активирован на <b>{days} дн.</b>\n\n"
+                            "👇 Нажмите кнопку и отправьте заявку на вступление\n"
+                            "👤 После этого администратор подтвердит доступ"
+                        ),
+                        reply_markup=kb,
+                        parse_mode="HTML"
+                    )
 
                 except Exception as e:
-                    logger.error(f"card_checker inner error: {e}")
+                    logger.error(f"Card inner error: {e}")
 
         except Exception as e:
-            logger.error(f"card_checker loop error: {e}")
+            logger.error(f"Card checker loop error: {e}")
 
         await asyncio.sleep(5)
+
+JOIN_LINK = "https://t.me/+ffk7dB_5zPhkMWFk"
+
 
 async def crypto_checker():
     while True:
@@ -774,7 +809,6 @@ async def crypto_checker():
             for inv_id, user_id, plan_id in invoices:
 
                 try:
-                    # 📡 проверка оплаты
                     async with http_session.get(
                         f"https://pay.crypt.bot/api/getInvoices?invoice_ids={inv_id}",
                         headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN}
@@ -787,16 +821,15 @@ async def crypto_checker():
 
                     status = items[0].get("status")
 
-                    # ❗ ждём оплату
+                    # ⛔ ждём оплату
                     if status != "paid":
                         continue
 
                     days = PLANS[plan_id]["days"]
 
-                    # 🎯 выдаём подписку
+                    # 🎯 начисляем подписку
                     await extend_user(user_id, days)
 
-                    # 🔒 фиксируем оплату
                     async with aiosqlite.connect(DB_NAME) as db:
                         await db.execute(
                             "UPDATE crypto_invoices SET status='paid' WHERE invoice_id=?",
@@ -804,10 +837,10 @@ async def crypto_checker():
                         )
                         await db.commit()
 
-                    # 🔗 ЕДИНЫЙ ВХОД (как Stars / Card)
+                    # 🔥 выдаём доступ через JOIN REQUEST
                     kb = InlineKeyboardMarkup(inline_keyboard=[
                         [InlineKeyboardButton(
-                            text="📢 Вступить в канал",
+                            text="📢 Вступить в закрытый канал",
                             url=JOIN_LINK
                         )]
                     ])
@@ -815,19 +848,20 @@ async def crypto_checker():
                     await bot.send_message(
                         user_id,
                         (
-                            f"✅ Оплата через Crypto подтверждена!\n\n"
+                            "✅ Оплата через Crypto подтверждена!\n\n"
                             f"🎉 Доступ активирован на <b>{days} дн.</b>\n\n"
-                            "👇 Нажмите кнопку и отправьте заявку на вступление"
+                            "👇 Нажмите кнопку и отправьте заявку на вступление\n"
+                            "👤 После этого администратор подтвердит доступ"
                         ),
                         reply_markup=kb,
                         parse_mode="HTML"
                     )
 
                 except Exception as e:
-                    logging.error(f"Crypto inner error: {e}")
+                    logger.error(f"Crypto inner error: {e}")
 
         except Exception as e:
-            logging.error(f"Crypto checker loop error: {e}")
+            logger.error(f"Crypto checker loop error: {e}")
 
         await asyncio.sleep(20)
 
