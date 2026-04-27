@@ -203,6 +203,15 @@ async def init_db():
 
 async def get_user(user_id):
     async with aiosqlite.connect(DB_NAME) as db:
+
+        # 🔥 гарантируем, что пользователь существует
+        await db.execute(
+            "INSERT OR IGNORE INTO users (user_id) VALUES (?)",
+            (user_id,)
+        )
+        await db.commit()
+
+        # 📦 получаем данные
         async with db.execute(
             "SELECT user_id, expiry, referrer, ref_count, bonus_days FROM users WHERE user_id=?",
             (user_id,)
