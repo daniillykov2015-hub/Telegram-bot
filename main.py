@@ -593,12 +593,12 @@ async def success(message: Message):
     payload = message.successful_payment.invoice_payload
 
     if not payload.startswith("stars_"):
-    return
-        plan_id = payload.split("_")[1]
-        days = PLANS[plan_id]["days"]
+        return
 
-        # 1. Начисляем подписку
-        await extend_user(message.from_user.id, days)
+    plan_id = payload.split("_")[1]
+    days = PLANS[plan_id]["days"]
+
+    await extend_user(message.from_user.id, days)
 
         try:
             # 2. Делаем invite link НА СРОК ПОДПИСКИ
