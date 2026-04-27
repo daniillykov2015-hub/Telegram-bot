@@ -279,6 +279,14 @@ async def extend_user(user_id, days, is_bonus=False):
 
         await db.commit()
 
+        await db.execute("""
+CREATE TABLE IF NOT EXISTS invite_links (
+    user_id INTEGER PRIMARY KEY,
+    invite_link TEXT,
+    expire_at TEXT
+)
+""")
+
 # ================== KEYBOARDS ==================
 def main_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
