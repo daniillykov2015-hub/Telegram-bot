@@ -670,43 +670,37 @@ async def pre_checkout(pre: PreCheckoutQuery):
 async def success(message: Message):
     payload = message.successful_payment.invoice_payload
 
-    # 💳 обрабатываем только Stars
+    # 💳 только Stars
     if not payload.startswith("stars_"):
         return
 
     plan_id = payload.split("_")[1]
-    days = PLANS[plan_id]["days"]
+    plan = PLANS.get(plan_id)
+
+    if not plan:
+        await message.answer("❌ Тариф не найден")
+        return
+
+    days = plan["days"]
 
     # 🎯 начисляем подписку
     await extend_user(message.from_user.id, days)
 
     try:
-        # 🔥 СТАБИЛЬНЫЙ ДОСТУП (как Card/Crypto)
-        invite = await bot.create_chat_invite_link(
-            chat_id=CHANNEL_ID,
-            member_limit=1,
-            expire_date=datetime.now(timezone.utc) + timedelta(hours=12)
-        )
-
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(
-                text="📢 Войти в закрытый канал",
-                url=invite.invite_link
-            )]
-        ])
+        # 🚀 ВАЖНО: НЕ создаём инвайт ссылку вообще
+        # используем единый механизм join request (как Card/Crypto)
 
         await message.answer(
             (
                 f"✅ Оплата прошла успешно!\n\n"
-                f"🎉 Доступ активирован на <b>{days} дн.</b>\n"
-                f"👇 Вход в канал по кнопке ниже:"
+                f"🎉 Доступ активирован на <b>{days} дн.</b>\n\n"
+                "👉 Просто нажмите «Вступить в канал» в Telegram — доступ откроется автоматически"
             ),
-            reply_markup=kb,
             parse_mode="HTML"
         )
 
     except Exception as e:
-        logging.error(f"Invite error: {e}")
+        logging.error(f"Stars success error: {e}")
 
         await message.answer(
             (
@@ -742,26 +736,24 @@ async def card_checker():
                         }
                     ) as resp:
 
-                        text = await resp.text()
-
                         if resp.status != 200:
-                            logger.error(f"Platega HTTP error {resp.status}: {text}")
+                            logger.error(f"Platega HTTP error {resp.status}")
                             continue
 
                         try:
                             data = await resp.json()
                         except Exception:
-                            logger.error(f"Platega invalid JSON: {text}")
+                            logger.error("Platega invalid JSON")
                             continue
 
                     status = str(data.get("status", "")).upper()
                     logger.info(f"PLATEGA CHECK {transaction_id}: {status}")
 
-                    # ❗ ждём только финальный статус
+                    # ❗ ждём оплату
                     if status not in ("CONFIRMED", "SUCCESS", "PAID"):
                         continue
 
-                    # 🔒 помечаем как оплачено (атомарно)
+                    # 🔒 защита от повторной обработки
                     async with aiosqlite.connect(DB_NAME) as db:
                         cursor = await db.execute(
                             "UPDATE card_invoices SET status='paid' WHERE payload=? AND status='pending'",
@@ -777,16 +769,15 @@ async def card_checker():
                     # 🎯 выдаём подписку
                     await extend_user(user_id, days)
 
-                    # 🚀 PRO-ЛОГИКА: БЕЗ ИНВАЙТОВ
-                    # Пользователь просто жмёт "Вступить в канал"
-                    # и проходит через chat_join_request
+                    # 🚀 ВАЖНО: НЕ создаём инвайт вообще
+                    # доступ идёт через chat_join_request
 
                     await bot.send_message(
                         user_id,
                         (
                             f"✅ Оплата подтверждена!\n\n"
                             f"🎉 Доступ активирован на <b>{days} дн.</b>\n\n"
-                            "👉 Просто нажмите «Вступить в канал» в Telegram"
+                            "👉 Просто нажмите «Вступить в канал» в Telegram — доступ откроется автоматически"
                         ),
                         parse_mode="HTML"
                     )
@@ -824,6 +815,7 @@ async def crypto_checker():
 
                     status = items[0].get("status")
 
+                    # ❗ ждём только оплату
                     if status != "paid":
                         continue
 
@@ -833,7 +825,7 @@ async def crypto_checker():
                     # 🎯 начисляем подписку
                     await extend_user(user_id, days)
 
-                    # 🔒 помечаем как оплачено (один раз)
+                    # 🔒 помечаем как оплачено
                     async with aiosqlite.connect(DB_NAME) as db:
                         await db.execute(
                             "UPDATE crypto_invoices SET status='paid' WHERE invoice_id=?",
@@ -841,11 +833,9 @@ async def crypto_checker():
                         )
                         await db.commit()
 
-                    # 🔥 СТАБИЛЬНЫЙ ИНВАЙТ (ФИКС “ссылка недействительна”)
+                    # 🔥 СТАБИЛЬНЫЙ ВХОД (БЕЗ ВРЕМЕННЫХ ИНВАЙТОВ)
                     invite = await bot.create_chat_invite_link(
-                        chat_id=CHANNEL_ID,
-                        member_limit=1,
-                        expire_date=datetime.now(timezone.utc) + timedelta(hours=12)
+                        chat_id=CHANNEL_ID
                     )
 
                     kb = InlineKeyboardMarkup(inline_keyboard=[
