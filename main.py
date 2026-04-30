@@ -209,7 +209,7 @@ async def init_db():
     bonus_days INTEGER DEFAULT 0,
     pending_days INTEGER,
     in_chat INTEGER DEFAULT 0
-)
+)""")
 
         # 💰 CRYPTO
         await db.execute("""
