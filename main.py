@@ -653,49 +653,74 @@ async def card_confirm(call: CallbackQuery):
 
     await call.answer()
 # --- CRYPTO ---
-@router.callback_query(F.data == "crypto")
-async def crypto_menu(call: CallbackQuery):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"{p['name']} — {p['crypto']}$", callback_data=f"crypto_confirm:{k}")]
-        for k, p in PLANS.items()
-    ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
-    await call.message.edit_text("💰 Выберите тариф Crypto (USDT):", reply_markup=kb)
-    await call.answer()
-
 @router.callback_query(F.data.startswith("crypto_confirm:"))
 async def crypto_confirm(call: CallbackQuery):
     plan_id = call.data.split(":")[1]
-    plan = PLANS[plan_id]
-    
-    async with http_session.post("https://pay.crypt.bot/api/createInvoice",
-        headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
-        json={"asset": "USDT", "amount": str(plan["crypto"]), "description": f"Subscription {plan['name']}"}
-    ) as response:
-        r = await response.json()
+    plan = PLANS.get(plan_id)
 
-    if not r.get("ok"):
-        await call.message.answer("❌ Ошибка CryptoPay")
+    if not plan:
+        await call.message.answer("❌ Тариф не найден")
         return
 
-    pay_url = r["result"]["pay_url"]
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("INSERT OR IGNORE INTO crypto_invoices (invoice_id, user_id, plan_id) VALUES (?, ?, ?)",
-                         (str(r["result"]["invoice_id"]), call.from_user.id, plan_id))
-        await db.commit()
+    try:
+        # 💡 создаём инвойс
+        async with http_session.post(
+            "https://pay.crypt.bot/api/createInvoice",
+            headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
+            json={
+                "asset": "USDT",
+                "amount": plan["crypto"],  # ❗ ЧИСЛО, НЕ строка
+                "description": f"Subscription {plan['name']}"
+            }
+        ) as response:
 
-    text = (
-        "<b>Проверьте детали платежа:</b>\n\n"
-        f"📦 Тариф: {plan['name']}\n"
-        f"🗓 Срок: {plan['name']}\n"
-        "💳 Способ оплаты: 💰 CryptoBot (USDT)\n"
-        f"💰 К оплате: {plan['crypto']} $\n\n"
-        "Нажмите 💸 Оплатить, чтобы перейти к оплате."
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💸 Оплатить", url=pay_url)],
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="crypto")]
-    ])
-    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+            if response.status != 200:
+                text = await response.text()
+                logger.error(f"Crypto HTTP error: {response.status} | {text}")
+                await call.message.answer("❌ Ошибка соединения с CryptoBot")
+                return
+
+            data = await response.json()
+
+        # ❗ если API вернул ошибку
+        if not data.get("ok"):
+            logger.error(f"Crypto API error: {data}")
+            await call.message.answer("❌ Ошибка оплаты. Попробуйте позже")
+            return
+
+        result = data["result"]
+        pay_url = result["pay_url"]
+        invoice_id = str(result["invoice_id"])
+
+        # 💡 сохраняем инвойс
+        async with aiosqlite.connect(DB_NAME) as db:
+            await db.execute(
+                "INSERT OR IGNORE INTO crypto_invoices (invoice_id, user_id, plan_id) VALUES (?, ?, ?)",
+                (invoice_id, call.from_user.id, plan_id)
+            )
+            await db.commit()
+
+        # 🔥 UI
+        text = (
+            "<b>Проверьте детали платежа:</b>\n\n"
+            f"📦 Тариф: {plan['name']}\n"
+            f"🗓 Срок: {plan['name']}\n"
+            "💳 Способ оплаты: 💰 CryptoBot (USDT)\n"
+            f"💰 К оплате: {plan['crypto']} $\n\n"
+            "Нажмите 💸 Оплатить, чтобы перейти к оплате."
+        )
+
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💸 Оплатить", url=pay_url)],
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="crypto")]
+        ])
+
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+    except Exception as e:
+        logger.error(f"Crypto createInvoice error: {e}")
+        await call.message.answer("❌ Ошибка создания платежа")
+
     await call.answer()
 
 # --- REFERRAL ---
