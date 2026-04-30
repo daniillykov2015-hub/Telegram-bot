@@ -917,13 +917,25 @@ async def crypto_checker():
 
             for inv_id, user_id, plan_id in invoices:
                 try:
+                    # 💡 НОРМАЛЬНЫЙ запрос к Crypto API
                     async with http_session.get(
                         "https://pay.crypt.bot/api/getInvoices",
                         headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
                         params={"invoice_ids": inv_id}
                     ) as resp:
 
-                        data = await resp.json()
+                        raw_text = await resp.text()
+
+                        try:
+                            data = await resp.json()
+                        except Exception:
+                            logger.error(f"Crypto JSON error: {raw_text}")
+                            continue
+
+                    # ❗ защита от пустого ответа
+                    if not data.get("ok"):
+                        logger.error(f"Crypto API error response: {data}")
+                        continue
 
                     items = data.get("result", {}).get("items", [])
                     if not items:
@@ -932,7 +944,7 @@ async def crypto_checker():
                     status = str(items[0].get("status", "")).lower()
 
                     # ⛔ не оплачено
-                    if status not in ("paid", "success", "completed"):
+                    if status != "paid":
                         continue
 
                     async with aiosqlite.connect(DB_NAME) as db:
@@ -968,7 +980,7 @@ async def crypto_checker():
                         except Exception as e:
                             logger.error(f"Admin notification error (Crypto): {e}")
 
-                    # 🔥 выдача доступа пользователю
+                    # 🔥 выдача доступа
                     kb = InlineKeyboardMarkup(inline_keyboard=[
                         [InlineKeyboardButton(
                             text="📢 Вступить в закрытый канал",
