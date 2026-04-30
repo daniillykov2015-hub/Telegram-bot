@@ -202,12 +202,14 @@ async def init_db():
         # 👤 USERS
         await db.execute("""
         CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            expiry TEXT,
-            referrer INTEGER,
-            ref_count INTEGER DEFAULT 0,
-            bonus_days INTEGER DEFAULT 0
-        )""")
+    user_id INTEGER PRIMARY KEY,
+    expiry TEXT,
+    referrer INTEGER,
+    ref_count INTEGER DEFAULT 0,
+    bonus_days INTEGER DEFAULT 0,
+    pending_days INTEGER,
+    in_chat INTEGER DEFAULT 0
+)
 
         # 💰 CRYPTO
         await db.execute("""
