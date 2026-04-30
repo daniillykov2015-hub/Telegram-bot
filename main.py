@@ -917,58 +917,51 @@ async def crypto_checker():
 
             for inv_id, user_id, plan_id in invoices:
                 try:
-                    # 💡 НОРМАЛЬНЫЙ запрос к Crypto API
                     async with http_session.get(
                         "https://pay.crypt.bot/api/getInvoices",
                         headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
                         params={"invoice_ids": inv_id}
                     ) as resp:
 
-                        raw_text = await resp.text()
-
-                        try:
-                            data = await resp.json()
-                        except Exception:
-                            logger.error(f"Crypto JSON error: {raw_text}")
+                        # ❗ если API умер — пропускаем
+                        if resp.status != 200:
+                            logger.error(f"Crypto HTTP error: {resp.status}")
                             continue
 
-                    # ❗ защита от пустого ответа
+                        data = await resp.json()
+
+                    # ❗ если API вернул ошибку
                     if not data.get("ok"):
-                        logger.error(f"Crypto API error response: {data}")
+                        logger.error(f"Crypto API error: {data}")
                         continue
 
                     items = data.get("result", {}).get("items", [])
                     if not items:
                         continue
 
-                    status = str(items[0].get("status", "")).lower()
+                    status = items[0].get("status")
 
-                    # ⛔ не оплачено
+                    # ⛔ обрабатываем ТОЛЬКО paid
                     if status != "paid":
                         continue
 
                     async with aiosqlite.connect(DB_NAME) as db:
-                        async with db.execute(
-                            "SELECT status FROM crypto_invoices WHERE invoice_id=?",
-                            (inv_id,)
-                        ) as cur:
-                            row = await cur.fetchone()
-
-                        # 💡 уже обработано
-                        if not row or row[0] == "paid":
-                            continue
-
-                        await db.execute(
-                            "UPDATE crypto_invoices SET status='paid' WHERE invoice_id=?",
+                        cursor = await db.execute(
+                            "UPDATE crypto_invoices SET status='paid' WHERE invoice_id=? AND status='pending'",
                             (inv_id,)
                         )
                         await db.commit()
 
+                    # 💡 если уже обработано — выходим
+                    if cursor.rowcount == 0:
+                        continue
+
                     days = PLANS[plan_id]["days"]
 
+                    # 🎯 начисляем подписку
                     await extend_user(user_id, days)
 
-                    # 🔔 админ уведомление
+                    # 🔔 уведомление админу
                     if ADMIN_ID:
                         try:
                             await notify_admin(
@@ -978,7 +971,7 @@ async def crypto_checker():
                                 extra=f"🆔 Invoice: <code>{inv_id}</code>"
                             )
                         except Exception as e:
-                            logger.error(f"Admin notification error (Crypto): {e}")
+                            logger.error(f"Admin notify error: {e}")
 
                     # 🔥 выдача доступа
                     kb = InlineKeyboardMarkup(inline_keyboard=[
