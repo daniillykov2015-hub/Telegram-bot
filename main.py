@@ -36,8 +36,19 @@ ADMIN_ID = os.getenv("ADMIN_ID")
 if ADMIN_ID:
     ADMIN_ID = int(ADMIN_ID)
 
-if not BOT_TOKEN or not CRYPTO_TOKEN or not CHANNEL_ID:
-    raise ValueError("Missing environment variables!")
+missing = []
+
+if not BOT_TOKEN:
+    missing.append("TELEGRAM_BOT_TOKEN")
+
+if not CRYPTO_TOKEN:
+    missing.append("CRYPTO_TOKEN")
+
+if not CHANNEL_ID:
+    missing.append("TELEGRAM_GROUP_ID")
+
+if missing:
+    raise ValueError(f"Missing env vars: {', '.join(missing)}")
 
 CHANNEL_ID = int(CHANNEL_ID)
 DB_NAME = "users.db"
