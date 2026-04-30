@@ -471,6 +471,53 @@ async def start(message: Message):
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
     await call.message.edit_text(MAIN_TEXT, reply_markup=main_menu_kb())
+
+from aiogram.types import ChatMemberUpdated
+import aiosqlite
+
+
+@router.chat_member()
+async def on_member_update(event: ChatMemberUpdated):
+    try:
+        user_id = event.from_user.id
+
+        # человек реально вступил в группу (ты его приняла)
+        if event.new_chat_member.status in ("member", "administrator"):
+
+            async with aiosqlite.connect(DB_NAME) as db:
+                async with db.execute(
+                    "SELECT pending_days FROM users WHERE user_id=?",
+                    (user_id,)
+                ) as cur:
+                    row = await cur.fetchone()
+
+            if not row or not row[0]:
+                return
+
+            days = row[0]
+
+            # 🚀 старт подписки с момента входа
+            await extend_user(user_id, days)
+
+            # очищаем pending
+            async with aiosqlite.connect(DB_NAME) as db:
+                await db.execute(
+                    "UPDATE users SET pending_days=NULL, in_chat=1 WHERE user_id=?",
+                    (user_id,)
+                )
+                await db.commit()
+
+            # уведомление пользователю
+            try:
+                await bot.send_message(
+                    user_id,
+                    f"✅ Доступ активирован!\n\n⏳ Срок: {days} дн. начинается с момента входа"
+                )
+            except:
+                pass
+
+    except Exception as e:
+        logging.error(f"chat_member error: {e}")
 # --- PLATEGA ---
 @router.callback_query(F.data.startswith("card_confirm:"))
 async def card_confirm(call: CallbackQuery):
