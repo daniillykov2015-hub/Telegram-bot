@@ -906,8 +906,6 @@ async def card_checker():
         await asyncio.sleep(5)
 # --- КРИПТО-ЧЕКЕР (CryptoBot) ---
 
-JOIN_LINK = "https://t.me/+ffk7dB_5zPhkMWFk"
-
 async def crypto_checker():
     while True:
         try:
@@ -920,34 +918,45 @@ async def crypto_checker():
             for inv_id, user_id, plan_id in invoices:
                 try:
                     async with http_session.get(
-                        f"https://pay.crypt.bot/api/getInvoices?invoice_ids={inv_id}",
-                        headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN}
+                        "https://pay.crypt.bot/api/getInvoices",
+                        headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
+                        params={"invoice_ids": inv_id}
                     ) as resp:
+
                         data = await resp.json()
 
                     items = data.get("result", {}).get("items", [])
                     if not items:
                         continue
 
-                    status = items[0].get("status")
+                    status = str(items[0].get("status", "")).lower()
 
-                    # ⛔ ждём оплату
-                    if status != "paid":
+                    # ⛔ не оплачено
+                    if status not in ("paid", "success", "completed"):
                         continue
 
-                    days = PLANS[plan_id]["days"]
-
-                    # 🎯 начисляем подписку
-                    await extend_user(user_id, days)
-
                     async with aiosqlite.connect(DB_NAME) as db:
+                        async with db.execute(
+                            "SELECT status FROM crypto_invoices WHERE invoice_id=?",
+                            (inv_id,)
+                        ) as cur:
+                            row = await cur.fetchone()
+
+                        # 💡 уже обработано
+                        if not row or row[0] == "paid":
+                            continue
+
                         await db.execute(
                             "UPDATE crypto_invoices SET status='paid' WHERE invoice_id=?",
                             (inv_id,)
                         )
                         await db.commit()
 
-                    # 🔔 УВЕДОМЛЕНИЕ АДМИНУ (ИСПРАВЛЕНО)
+                    days = PLANS[plan_id]["days"]
+
+                    await extend_user(user_id, days)
+
+                    # 🔔 админ уведомление
                     if ADMIN_ID:
                         try:
                             await notify_admin(
@@ -956,10 +965,10 @@ async def crypto_checker():
                                 method="Crypto 💰",
                                 extra=f"🆔 Invoice: <code>{inv_id}</code>"
                             )
-                        except Exception as admin_err:
-                            logger.error(f"Admin notification error (Crypto): {admin_err}")
+                        except Exception as e:
+                            logger.error(f"Admin notification error (Crypto): {e}")
 
-                    # 🔥 выдаём доступ пользователю
+                    # 🔥 выдача доступа пользователю
                     kb = InlineKeyboardMarkup(inline_keyboard=[
                         [InlineKeyboardButton(
                             text="📢 Вступить в закрытый канал",
@@ -985,7 +994,7 @@ async def crypto_checker():
         except Exception as e:
             logger.error(f"Crypto checker loop error: {e}")
 
-        await asyncio.sleep(20)
+        await asyncio.sleep(15)
 
 async def check_subscriptions():
     while True:
