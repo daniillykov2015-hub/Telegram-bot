@@ -96,42 +96,64 @@ async def notify_admin(user_id: int, plan_name: str, method: str, extra: str = "
 # ================== TEXTS ==================оплаты 👇"
 TEXTS = {
     "ru": {
-        "main": "👋 Привет, я Ева и это мой закрытый канал\n\n"
-                "❓ Что внутри?\n\n"
-                "Закрытый контент по подписке\n"
-                "💎 Без ограничений\n"
-                "🔥 Обновления регулярно\n\n"
-                "Выбери способ оплаты 👇"
+        "main": "👋 Привет, я Ева и это мой закрытый канал\n\nВыбери способ оплаты 👇",
+        "buttons": {
+            "card": "💳 Карта / СБП (₽)",
+            "stars": "⭐ Stars",
+            "crypto": "💰 Crypto ($)",
+            "ref": "👥 Реферальная система",
+            "support": "💬 Поддержка",
+            "info": "ℹ️ Информация",
+            "back": "⬅ Назад"
+        }
     },
     "en": {
-        "main": "👋 Hi, I'm Eva and this is my private channel\n\n"
-                "❓ What's inside?\n\n"
-                "Premium content\n"
-                "💎 No limits\n"
-                "🔥 Regular updates\n\n"
-                "Choose payment method 👇"
+        "main": "👋 Hi, I'm Eva and this is my private channel\n\nChoose payment method 👇",
+        "buttons": {
+            "card": "💳 Card / SBP (₽)",
+            "stars": "⭐ Stars",
+            "crypto": "💰 Crypto ($)",
+            "ref": "👥 Referral system",
+            "support": "💬 Support",
+            "info": "ℹ️ Info",
+            "back": "⬅ Back"
+        }
     },
     "de": {
-        "main": "👋 Hallo, ich bin Eva und das ist mein privater Kanal\n\n"
-                "❓ Inhalt?\n\n"
-                "Premium Inhalte\n"
-                "💎 Keine Limits\n"
-                "🔥 Updates\n\n"
-                "Zahlung wählen 👇"
+        "main": "👋 Hallo, ich bin Eva und das ist mein privater Kanal\n\nWähle eine Zahlungsmethode 👇",
+        "buttons": {
+            "card": "💳 Karte / SBP (₽)",
+            "stars": "⭐ Stars",
+            "crypto": "💰 Krypto ($)",
+            "ref": "👥 Empfehlungssystem",
+            "support": "💬 Support",
+            "info": "ℹ️ Info",
+            "back": "⬅ Zurück"
+        }
     },
     "es": {
-        "main": "👋 Hola, soy Eva...\n\n"
-                "Contenido premium\n"
-                "💎 Sin límites\n"
-                "🔥 Actualizaciones\n\n"
-                "Elige pago 👇"
+        "main": "👋 Hola, soy Eva y este es mi canal privado\n\nElige método de pago 👇",
+        "buttons": {
+            "card": "💳 Tarjeta / SBP (₽)",
+            "stars": "⭐ Stars",
+            "crypto": "💰 Cripto ($)",
+            "ref": "👥 Referidos",
+            "support": "💬 Soporte",
+            "info": "ℹ️ Información",
+            "back": "⬅ Atrás"
+        }
     },
     "fr": {
-        "main": "👋 Salut, je suis Eva...\n\n"
-                "Contenu premium\n"
-                "💎 Sans limites\n"
-                "🔥 Mises à jour\n\n"
-                "Choisir paiement 👇"
+        "main": "👋 Salut, je suis Eva et voici mon canal privé\n\nChoisissez le paiement 👇",
+        "buttons": {
+            "card": "💳 Carte / SBP (₽)",
+            "stars": "⭐ Stars",
+            "crypto": "💰 Crypto ($)",
+            "ref": "👥 Parrainage",
+            "support": "💬 Support",
+            "info": "ℹ️ Info",
+            "back": "⬅ Retour"
+        }
     }
 }
 
@@ -385,7 +407,14 @@ async def get_lang(user_id):
             (user_id,)
         ) as cur:
             row = await cur.fetchone()
-            return row[0] if row and row[0] else "en"
+
+    lang = row[0] if row and row[0] else "en"
+
+    # 🔥 страховка от любого мусора
+    if lang not in TEXTS:
+        lang = "en"
+
+    return lang
 
 # ================== KEYBOARDS ==================
 def lang_kb():
@@ -402,26 +431,6 @@ def lang_kb():
             InlineKeyboardButton(text="🇫🇷 Français", callback_data="lang_fr"),
         ]
     ])
-
-
-def main_menu_kb():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="💳 Карта / СБП (₽)", callback_data="pay_card"),
-        ],
-        [
-            InlineKeyboardButton(text="⭐ Stars", callback_data="stars"),
-            InlineKeyboardButton(text="💰 Crypto ($)", callback_data="crypto"),
-        ],
-        [
-            InlineKeyboardButton(text="👥 Реферальная система", callback_data="ref"),
-            InlineKeyboardButton(text="💬 Поддержка", url="https://t.me/mistybibi"),
-        ],
-        [
-            InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")
-        ]
-    ])
-
 
 # ================== INVITE SYSTEM ==================
 async def get_or_create_invite(user_id: int, days: int):
