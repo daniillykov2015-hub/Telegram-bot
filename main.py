@@ -339,6 +339,21 @@ CREATE TABLE IF NOT EXISTS invite_links (
 """)
 
 # ================== KEYBOARDS ==================
+def lang_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang_ru"),
+            InlineKeyboardButton(text="🇬🇧 English", callback_data="lang_en"),
+        ],
+        [
+            InlineKeyboardButton(text="🇩🇪 Deutsch", callback_data="lang_de"),
+            InlineKeyboardButton(text="🇪🇸 Español", callback_data="lang_es"),
+        ],
+        [
+            InlineKeyboardButton(text="🇫🇷 Français", callback_data="lang_fr"),
+        ]
+    ])
+
 def main_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
