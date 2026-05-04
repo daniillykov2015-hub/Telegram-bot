@@ -96,7 +96,7 @@ async def notify_admin(user_id: int, plan_name: str, method: str, extra: str = "
 # ================== TEXTS ==================оплаты 👇"
 TEXTS = {
     "ru": {
-        "main": "👋 Привет, я Ева и это мой закрытый канал\n\nВыбери способ оплаты 👇",
+        "main": "👋 Привет, я Ева.\n\nЭто мой закрытый уголок, куда я пускаю не всех.\n\nЗдесь ты увидишь то, что обычно остаётся за кадром.\n\nВыбери способ входа 👇",
         "buttons": {
             "card": "💳 Карта / СБП (₽)",
             "stars": "⭐ Stars",
@@ -107,8 +107,9 @@ TEXTS = {
             "back": "⬅ Назад"
         }
     },
+
     "en": {
-        "main": "👋 Hi, I'm Eva and this is my private channel\n\nChoose payment method 👇",
+        "main": "👋 Hey, I'm Eva.\n\nThis is my private space — not everyone gets in.\n\nHere you’ll see what usually stays behind the scenes.\n\nChoose how you want to get access 👇",
         "buttons": {
             "card": "💳 Card / SBP (₽)",
             "stars": "⭐ Stars",
@@ -119,8 +120,9 @@ TEXTS = {
             "back": "⬅ Back"
         }
     },
+
     "de": {
-        "main": "👋 Hallo, ich bin Eva und das ist mein privater Kanal\n\nWähle eine Zahlungsmethode 👇",
+        "main": "👋 Hi, ich bin Eva.\n\nDas ist mein privater Raum — nicht jeder kommt hier rein.\n\nHier siehst du Dinge, die sonst verborgen bleiben.\n\nWähle deinen Zugang 👇",
         "buttons": {
             "card": "💳 Karte / SBP (₽)",
             "stars": "⭐ Stars",
@@ -131,8 +133,9 @@ TEXTS = {
             "back": "⬅ Zurück"
         }
     },
+
     "es": {
-        "main": "👋 Hola, soy Eva y este es mi canal privado\n\nElige método de pago 👇",
+        "main": "👋 Hola, soy Eva.\n\nEste es mi espacio privado — no todos entran aquí.\n\nAquí verás lo que normalmente no se muestra.\n\nElige cómo quieres entrar 👇",
         "buttons": {
             "card": "💳 Tarjeta / SBP (₽)",
             "stars": "⭐ Stars",
@@ -143,8 +146,9 @@ TEXTS = {
             "back": "⬅ Atrás"
         }
     },
+
     "fr": {
-        "main": "👋 Salut, je suis Eva et voici mon canal privé\n\nChoisissez le paiement 👇",
+        "main": "👋 Salut, je suis Eva.\n\nC’est mon espace privé — tout le monde n’y a pas accès.\n\nIci, tu verras ce qui reste normalement hors caméra.\n\nChoisis ton accès 👇",
         "buttons": {
             "card": "💳 Carte / SBP (₽)",
             "stars": "⭐ Stars",
