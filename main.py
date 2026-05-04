@@ -102,6 +102,36 @@ TEXTS = {
                 "💎 Без ограничений\n"
                 "🔥 Обновления регулярно\n\n"
                 "Выбери способ оплаты 👇"
+    },
+    "en": {
+        "main": "👋 Hi, I'm Eva and this is my private channel\n\n"
+                "❓ What's inside?\n\n"
+                "Premium content\n"
+                "💎 No limits\n"
+                "🔥 Regular updates\n\n"
+                "Choose payment method 👇"
+    },
+    "de": {
+        "main": "👋 Hallo, ich bin Eva und das ist mein privater Kanal\n\n"
+                "❓ Inhalt?\n\n"
+                "Premium Inhalte\n"
+                "💎 Keine Limits\n"
+                "🔥 Updates\n\n"
+                "Zahlung wählen 👇"
+    },
+    "es": {
+        "main": "👋 Hola, soy Eva...\n\n"
+                "Contenido premium\n"
+                "💎 Sin límites\n"
+                "🔥 Actualizaciones\n\n"
+                "Elige pago 👇"
+    },
+    "fr": {
+        "main": "👋 Salut, je suis Eva...\n\n"
+                "Contenu premium\n"
+                "💎 Sans limites\n"
+                "🔥 Mises à jour\n\n"
+                "Choisir paiement 👇"
     }
 }
 
@@ -455,20 +485,21 @@ def lang_kb():
     ])
 
 
-def main_menu_kb():
+async def main_menu_kb(user_id: int):
+    lang = await get_lang(user_id)
+    t = TEXTS[lang]["buttons"]
+
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=t["card"], callback_data="pay_card")],
         [
-            InlineKeyboardButton(text="💳 Карта / СБП (₽)", callback_data="pay_card"),
+            InlineKeyboardButton(text=t["stars"], callback_data="stars"),
+            InlineKeyboardButton(text=t["crypto"], callback_data="crypto"),
         ],
         [
-            InlineKeyboardButton(text="⭐ Stars", callback_data="stars"),
-            InlineKeyboardButton(text="💰 Crypto ($)", callback_data="crypto"),
+            InlineKeyboardButton(text=t["ref"], callback_data="ref"),
+            InlineKeyboardButton(text=t["support"], url="https://t.me/mistybibi"),
         ],
-        [
-            InlineKeyboardButton(text="👥 Реферальная система", callback_data="ref"),
-            InlineKeyboardButton(text="💬 Поддержка", url="https://t.me/mistybibi"),
-        ],
-        [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
+        [InlineKeyboardButton(text=t["info"], callback_data="info")]
     ])
 
 
@@ -517,30 +548,33 @@ async def get_or_create_invite(user_id: int, days: int):
 
 
 # ================== HANDLERS ==================
+
 @router.callback_query(F.data.startswith("lang_"))
 async def set_lang(call: CallbackQuery):
     user_id = call.from_user.id
     lang = call.data.split("_")[1]
 
     async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("""
-            UPDATE users SET lang=? WHERE user_id=?
-        """, (lang, user_id))
+        await db.execute(
+            "UPDATE users SET lang=? WHERE user_id=?",
+            (lang, user_id)
+        )
         await db.commit()
 
-    # ⚠️ FIX: у тебя TEXTS не определён в этом куске
-    # оставляю безопасный fallback
-    text = MAIN_TEXT
-
     await call.message.edit_text(
-        text,
-        reply_markup=main_menu_kb()
+        TEXTS[lang]["main"],
+        reply_markup=await main_menu_kb(user_id)
     )
     await call.answer()
 
 
+# ---------- STARS ----------
+
 @router.callback_query(F.data == "stars")
 async def stars_menu(call: CallbackQuery):
+    lang = await get_lang(call.from_user.id)
+    t = TEXTS[lang]["buttons"]
+
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
@@ -549,10 +583,10 @@ async def stars_menu(call: CallbackQuery):
             )
         ]
         for k, p in PLANS.items()
-    ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
+    ] + [[InlineKeyboardButton(text=t["back"], callback_data="back")]])
 
     await call.message.edit_text(
-        "⭐ Выберите период подписки Stars:",
+        "⭐ Выберите период подписки:",
         reply_markup=kb
     )
     await call.answer()
@@ -560,6 +594,9 @@ async def stars_menu(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("stars_confirm:"))
 async def stars_confirm(call: CallbackQuery):
+    lang = await get_lang(call.from_user.id)
+    t = TEXTS[lang]["buttons"]
+
     plan_id = call.data.split(":")[1]
     plan = PLANS.get(plan_id)
 
@@ -568,34 +605,38 @@ async def stars_confirm(call: CallbackQuery):
         return
 
     invoice_link = await bot.create_invoice_link(
-        title="Подписка",
-        description=f"Доступ в закрытый канал на {plan['name']}",
+        title="Subscription",
+        description=f"Access for {plan['name']}",
         payload=f"stars_{plan_id}",
         provider_token="",
         currency="XTR",
-        prices=[LabeledPrice(label="Оплата Stars", amount=plan["stars"])]
+        prices=[LabeledPrice(label="Stars", amount=plan["stars"])]
     )
 
     text = (
         "<b>Проверьте детали платежа:</b>\n\n"
         f"📦 Тариф: {plan['name']}\n"
         f"🗓 Срок: {plan['name']}\n"
-        "💳 Способ оплаты: ⭐ Telegram Stars\n"
-        f"💰 К оплате: {plan['stars']} ⭐\n\n"
-        "Нажмите 💸 Оплатить, чтобы перейти к оплате."
+        "💳 Способ: ⭐ Stars\n"
+        f"💰 К оплате: {plan['stars']} ⭐"
     )
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💸 Оплатить", url=invoice_link)],
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="stars")]
+        [InlineKeyboardButton(text=t["back"], callback_data="stars")]
     ])
 
     await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     await call.answer()
 
 
+# ---------- CARD ----------
+
 @router.callback_query(F.data == "pay_card")
 async def pay_card(call: CallbackQuery):
+    lang = await get_lang(call.from_user.id)
+    t = TEXTS[lang]["buttons"]
+
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
@@ -604,24 +645,26 @@ async def pay_card(call: CallbackQuery):
             )
         ]
         for k, p in PLANS.items()
-    ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
+    ] + [[InlineKeyboardButton(text=t["back"], callback_data="back")]])
 
     await call.message.edit_text(
-        "💳 Выберите тариф для оплаты картой / СБП:",
+        "💳 Выберите тариф:",
         reply_markup=kb
     )
     await call.answer()
 
+
+# ---------- START ----------
 
 @router.message(CommandStart())
 async def start(message: Message):
     user_id = message.from_user.id
 
     async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("""
-            INSERT OR IGNORE INTO users (user_id)
-            VALUES (?)
-        """, (user_id,))
+        await db.execute(
+            "INSERT OR IGNORE INTO users (user_id) VALUES (?)",
+            (user_id,)
+        )
         await db.commit()
 
     await message.answer(
@@ -630,16 +673,23 @@ async def start(message: Message):
     )
 
 
+# ---------- BACK ----------
+
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
-    await call.message.edit_text(
-        MAIN_TEXT,
-        reply_markup=main_menu_kb()
-    )
+    user_id = call.from_user.id
+    lang = await get_lang(user_id)
 
+    await call.message.edit_text(
+        TEXTS[lang]["main"],
+        reply_markup=await main_menu_kb(user_id)
+    )
+    await call.answer()
+
+
+# ---------- JOIN TRACK ----------
 
 from aiogram.types import ChatMemberUpdated
-
 
 @router.chat_member()
 async def on_member_update(event: ChatMemberUpdated):
@@ -663,17 +713,16 @@ async def on_member_update(event: ChatMemberUpdated):
             await extend_user(user_id, days)
 
             async with aiosqlite.connect(DB_NAME) as db:
-                await db.execute("""
-                    UPDATE users 
-                    SET pending_days=NULL, in_chat=1 
-                    WHERE user_id=?
-                """, (user_id,))
+                await db.execute(
+                    "UPDATE users SET pending_days=NULL, in_chat=1 WHERE user_id=?",
+                    (user_id,)
+                )
                 await db.commit()
 
             try:
                 await bot.send_message(
                     user_id,
-                    f"✅ Доступ активирован!\n\n⏳ Срок: {days} дн. начинается с момента входа"
+                    f"✅ Доступ активирован!\n\n⏳ {days} дней с момента входа"
                 )
             except:
                 pass
