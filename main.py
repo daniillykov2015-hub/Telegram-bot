@@ -210,17 +210,26 @@ PLANS = {
 # ================== DB LOGIC ==================
 async def init_db():
     async with aiosqlite.connect(DB_NAME) as db:
-        # 👤 USERS
+
         await db.execute("""
         CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    expiry TEXT,
-    referrer INTEGER,
-    ref_count INTEGER DEFAULT 0,
-    bonus_days INTEGER DEFAULT 0,
-    pending_days INTEGER,
-    in_chat INTEGER DEFAULT 0
-)""")
+            user_id INTEGER PRIMARY KEY,
+            expiry TEXT,
+            referrer INTEGER,
+            ref_count INTEGER DEFAULT 0,
+            bonus_days INTEGER DEFAULT 0,
+            pending_days INTEGER,
+            in_chat INTEGER DEFAULT 0,
+            lang TEXT DEFAULT 'ru'
+        )
+        """)
+
+        try:
+            await db.execute("SELECT lang FROM users LIMIT 1")
+        except:
+            await db.execute("ALTER TABLE users ADD COLUMN lang TEXT DEFAULT 'ru'")
+
+        await db.commit()
 
         # 💰 CRYPTO
         await db.execute("""
@@ -467,17 +476,23 @@ async def pay_card(call: CallbackQuery):
 
 @router.message(CommandStart())
 async def start(message: Message):
-    args = message.text.split()
     user_id = message.from_user.id
+
+    # создаём пользователя в БД если его нет
     async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
-        if len(args) > 1 and args[1].isdigit():
-            referrer = int(args[1])
-            # Нельзя пригласить самого себя
-            if referrer != user_id:
-                await db.execute("UPDATE users SET referrer = ? WHERE user_id = ? AND referrer IS NULL", (referrer, user_id))
+        await db.execute("""
+        INSERT OR IGNORE INTO users (user_id)
+        VALUES (?)
+        """, (user_id,))
         await db.commit()
-    await message.answer(MAIN_TEXT, reply_markup=main_menu_kb())
+
+    # 🚨 ВАЖНО: пока НЕ показываем MAIN_TEXT
+    # сначала язык
+
+    await message.answer(
+        "🌍 Choose your language / Выберите язык:",
+        reply_markup=lang_kb()
+    )
 
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
