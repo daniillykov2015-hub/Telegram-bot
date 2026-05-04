@@ -28,13 +28,16 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
 CHANNEL_ID = os.getenv("TELEGRAM_GROUP_ID")
-# Названия переменных точно как на твоем скриншоте
-PAYMENT_TOKEN = os.getenv("PLATEGA_API_KEY") 
+
+PAYMENT_TOKEN = os.getenv("PLATEGA_API_KEY")
 MERCHANT_ID = os.getenv("PLATEGA_MERCHANT_ID")
-# Твой личный ID (цифрами), чтобы бот знал, куда писать
-ADMIN_ID = os.getenv("ADMIN_ID") 
+
+ADMIN_ID = os.getenv("ADMIN_ID")
 if ADMIN_ID:
-    ADMIN_ID = int(ADMIN_ID)
+    try:
+        ADMIN_ID = int(ADMIN_ID)
+    except ValueError:
+        ADMIN_ID = None
 
 missing = []
 
@@ -50,7 +53,12 @@ if not CHANNEL_ID:
 if missing:
     raise ValueError(f"Missing env vars: {', '.join(missing)}")
 
-CHANNEL_ID = int(CHANNEL_ID)
+# ⚠️ безопаснее: не ломаемся если не число
+try:
+    CHANNEL_ID = int(CHANNEL_ID)
+except ValueError:
+    pass
+
 DB_NAME = "users.db"
 
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
@@ -61,13 +69,13 @@ dp.include_router(router)
 http_session = None
 tasks = []
 
+# ================== ADMIN NOTIFY ==================
 async def notify_admin(user_id: int, plan_name: str, method: str, extra: str = ""):
     if not ADMIN_ID:
         return
 
     try:
         user = await bot.get_chat(user_id)
-
         username = f"@{user.username}" if user.username else "нет username"
 
         text = (
@@ -85,7 +93,7 @@ async def notify_admin(user_id: int, plan_name: str, method: str, extra: str = "
 
     except Exception as e:
         logging.error(f"notify_admin error: {e}")
-# ================== TEXTS ==================
+# ================== TEXTS ==================оплаты 👇"
 MAIN_TEXT = (
     "👋 Привет, я Ева и это мой закрытый канал\n\n"
     "❓ Что внутри?\n\n"
@@ -224,10 +232,11 @@ async def init_db():
         )
         """)
 
+        # ⚠️ ALTER TABLE может падать, если колонка уже есть — это нормально
         try:
-            await db.execute("SELECT lang FROM users LIMIT 1")
-        except:
             await db.execute("ALTER TABLE users ADD COLUMN lang TEXT DEFAULT 'ru'")
+        except:
+            pass
 
         await db.commit()
 
@@ -238,7 +247,8 @@ async def init_db():
             user_id INTEGER,
             plan_id TEXT,
             status TEXT DEFAULT 'pending'
-        )""")
+        )
+        """)
 
         # 💳 CARD / SBP (Platega)
         await db.execute("""
@@ -247,7 +257,17 @@ async def init_db():
             user_id INTEGER,
             plan_id TEXT,
             status TEXT DEFAULT 'pending'
-        )""")
+        )
+        """)
+
+        # 📎 invite links
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS invite_links (
+            user_id INTEGER PRIMARY KEY,
+            invite_link TEXT,
+            expire_at TEXT
+        )
+        """)
 
         await db.commit()
 
@@ -264,7 +284,6 @@ async def get_user(user_id):
 async def extend_user(user_id, days, is_bonus=False):
     async with aiosqlite.connect(DB_NAME) as db:
 
-        # 📌 берём текущие данные
         async with db.execute(
             "SELECT expiry, referrer FROM users WHERE user_id=?",
             (user_id,)
@@ -280,7 +299,6 @@ async def extend_user(user_id, days, is_bonus=False):
 
         new_expiry = base + timedelta(days=days)
 
-        # 🔒 атомарное обновление подписки
         await db.execute("""
             INSERT INTO users (user_id, expiry)
             VALUES (?, ?)
@@ -288,12 +306,11 @@ async def extend_user(user_id, days, is_bonus=False):
             DO UPDATE SET expiry=excluded.expiry
         """, (user_id, new_expiry.isoformat()))
 
-        # 🎁 рефералка (только если не бонус)
+        # 🎁 рефералка
         if not is_bonus and row and row[1]:
 
             ref_id = row[1]
 
-            # проверяем активность реферера
             async with db.execute(
                 "SELECT expiry FROM users WHERE user_id=?",
                 (ref_id,)
@@ -306,7 +323,6 @@ async def extend_user(user_id, days, is_bonus=False):
 
                 if ref_expiry > datetime.now(timezone.utc):
 
-                    # 🔒 атомарное обновление рефералки
                     await db.execute("""
                         UPDATE users
                         SET ref_count = ref_count + 1,
@@ -316,7 +332,6 @@ async def extend_user(user_id, days, is_bonus=False):
 
                     await db.commit()
 
-                    # 🎁 даём бонус отдельно
                     await extend_user(ref_id, 7, is_bonus=True)
 
                     try:
@@ -330,13 +345,15 @@ async def extend_user(user_id, days, is_bonus=False):
 
         await db.commit()
 
-        await db.execute("""
-CREATE TABLE IF NOT EXISTS invite_links (
-    user_id INTEGER PRIMARY KEY,
-    invite_link TEXT,
-    expire_at TEXT
-)
-""")
+
+async def get_lang(user_id):
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute(
+            "SELECT lang FROM users WHERE user_id=?",
+            (user_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            return row[0] if row and row[0] else "en"
 
 # ================== KEYBOARDS ==================
 def lang_kb():
@@ -354,10 +371,91 @@ def lang_kb():
         ]
     ])
 
+
 def main_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            # Добавляем новую кнопку для Карт и СБП в самый верх
+            InlineKeyboardButton(text="💳 Карта / СБП (₽)", callback_data="pay_card"),
+        ],
+        [
+            InlineKeyboardButton(text="⭐ Stars", callback_data="stars"),
+            InlineKeyboardButton(text="💰 Crypto ($)", callback_data="crypto"),
+        ],
+        [
+            InlineKeyboardButton(text="👥 Реферальная система", callback_data="ref"),
+            InlineKeyboardButton(text="💬 Поддержка", url="https://t.me/mistybibi"),
+        ],
+        [
+            InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")
+        ]
+    ])
+
+
+# ================== INVITE SYSTEM ==================
+async def get_or_create_invite(user_id: int, days: int):
+    async with aiosqlite.connect(DB_NAME) as db:
+
+        async with db.execute(
+            "SELECT invite_link, expire_at FROM invite_links WHERE user_id=?",
+            (user_id,)
+        ) as cur:
+            row = await cur.fetchone()
+
+        now = datetime.now(timezone.utc)
+
+        # ⚠️ защита от битого expire_at
+        if row and row[0] and row[1]:
+            try:
+                exp = datetime.fromisoformat(row[1]).replace(tzinfo=timezone.utc)
+
+                if exp > now:
+                    return row[0]
+            except Exception:
+                pass
+
+        # создаём новую ссылку
+        expire_time = now + timedelta(days=days)
+
+        invite = await bot.create_chat_invite_link(
+            chat_id=CHANNEL_ID,
+            member_limit=0,
+            expire_date=int(expire_time.timestamp())
+        )
+
+        link = invite.invite_link
+
+        await db.execute("""
+            INSERT INTO invite_links (user_id, invite_link, expire_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id)
+            DO UPDATE SET
+                invite_link=excluded.invite_link,
+                expire_at=excluded.expire_at
+        """, (user_id, link, expire_time.isoformat()))
+
+        await db.commit()
+
+        return link
+# ================== KEYBOARDS ==================
+def lang_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang_ru"),
+            InlineKeyboardButton(text="🇬🇧 English", callback_data="lang_en"),
+        ],
+        [
+            InlineKeyboardButton(text="🇩🇪 Deutsch", callback_data="lang_de"),
+            InlineKeyboardButton(text="🇪🇸 Español", callback_data="lang_es"),
+        ],
+        [
+            InlineKeyboardButton(text="🇫🇷 Français", callback_data="lang_fr"),
+        ]
+    ])
+
+
+def main_menu_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
             InlineKeyboardButton(text="💳 Карта / СБП (₽)", callback_data="pay_card"),
         ],
         [
@@ -371,10 +469,10 @@ def main_menu_kb():
         [InlineKeyboardButton(text="ℹ️ Информация", callback_data="info")]
     ])
 
+
 async def get_or_create_invite(user_id: int, days: int):
     async with aiosqlite.connect(DB_NAME) as db:
 
-        # 1. проверяем существующую ссылку
         async with db.execute(
             "SELECT invite_link, expire_at FROM invite_links WHERE user_id=?",
             (user_id,)
@@ -383,28 +481,25 @@ async def get_or_create_invite(user_id: int, days: int):
 
         now = datetime.now(timezone.utc)
 
-        # 2. если ссылка есть и ещё жива — используем её
+        # если есть активная ссылка — используем
         if row:
             link, expire_at = row
-
             if expire_at:
                 exp = datetime.fromisoformat(expire_at)
-
                 if exp > now:
                     return link
 
-        # 3. иначе создаём новую ссылку
+        # создаём новую ссылку
         expire_time = now + timedelta(days=days)
 
         invite = await bot.create_chat_invite_link(
             chat_id=CHANNEL_ID,
-            member_limit=0,  # важно: без ограничения
+            member_limit=0,
             expire_date=int(expire_time.timestamp())
         )
 
         link = invite.invite_link
 
-        # 4. сохраняем в БД
         await db.execute("""
             INSERT INTO invite_links (user_id, invite_link, expire_at)
             VALUES (?, ?, ?)
@@ -417,16 +512,40 @@ async def get_or_create_invite(user_id: int, days: int):
         await db.commit()
 
         return link
+
+
 # ================== HANDLERS ==================
-# ================== STARS PAYMENT (из main 2) ==================
+@router.callback_query(F.data.startswith("lang_"))
+async def set_lang(call: CallbackQuery):
+    user_id = call.from_user.id
+    lang = call.data.split("_")[1]
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("""
+            UPDATE users SET lang=? WHERE user_id=?
+        """, (lang, user_id))
+        await db.commit()
+
+    # ⚠️ FIX: у тебя TEXTS не определён в этом куске
+    # оставляю безопасный fallback
+    text = MAIN_TEXT
+
+    await call.message.edit_text(
+        text,
+        reply_markup=main_menu_kb()
+    )
+    await call.answer()
+
 
 @router.callback_query(F.data == "stars")
 async def stars_menu(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text=f"{p['name']} — {p['stars']} ⭐",
-            callback_data=f"stars_confirm:{k}"
-        )]
+        [
+            InlineKeyboardButton(
+                text=f"{p['name']} — {p['stars']} ⭐",
+                callback_data=f"stars_confirm:{k}"
+            )
+        ]
         for k, p in PLANS.items()
     ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
 
@@ -443,8 +562,7 @@ async def stars_confirm(call: CallbackQuery):
     plan = PLANS.get(plan_id)
 
     if not plan:
-        await call.message.answer("❌ Тариф не найден")
-        await call.answer()
+        await call.answer("Тариф не найден", show_alert=True)
         return
 
     invoice_link = await bot.create_invoice_link(
@@ -473,13 +591,16 @@ async def stars_confirm(call: CallbackQuery):
     await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     await call.answer()
 
+
 @router.callback_query(F.data == "pay_card")
 async def pay_card(call: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text=f"{p['name']} — {p['rub']}₽",
-            callback_data=f"card_confirm:{k}"
-        )]
+        [
+            InlineKeyboardButton(
+                text=f"{p['name']} — {p['rub']}₽",
+                callback_data=f"card_confirm:{k}"
+            )
+        ]
         for k, p in PLANS.items()
     ] + [[InlineKeyboardButton(text="⬅ Назад", callback_data="back")]])
 
@@ -489,32 +610,33 @@ async def pay_card(call: CallbackQuery):
     )
     await call.answer()
 
+
 @router.message(CommandStart())
 async def start(message: Message):
     user_id = message.from_user.id
 
-    # создаём пользователя в БД если его нет
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("""
-        INSERT OR IGNORE INTO users (user_id)
-        VALUES (?)
+            INSERT OR IGNORE INTO users (user_id)
+            VALUES (?)
         """, (user_id,))
         await db.commit()
-
-    # 🚨 ВАЖНО: пока НЕ показываем MAIN_TEXT
-    # сначала язык
 
     await message.answer(
         "🌍 Choose your language / Выберите язык:",
         reply_markup=lang_kb()
     )
 
+
 @router.callback_query(F.data == "back")
 async def back(call: CallbackQuery):
-    await call.message.edit_text(MAIN_TEXT, reply_markup=main_menu_kb())
+    await call.message.edit_text(
+        MAIN_TEXT,
+        reply_markup=main_menu_kb()
+    )
+
 
 from aiogram.types import ChatMemberUpdated
-import aiosqlite
 
 
 @router.chat_member()
@@ -522,7 +644,6 @@ async def on_member_update(event: ChatMemberUpdated):
     try:
         user_id = event.from_user.id
 
-        # человек реально вступил в группу (ты его приняла)
         if event.new_chat_member.status in ("member", "administrator"):
 
             async with aiosqlite.connect(DB_NAME) as db:
@@ -537,18 +658,16 @@ async def on_member_update(event: ChatMemberUpdated):
 
             days = row[0]
 
-            # 🚀 старт подписки с момента входа
             await extend_user(user_id, days)
 
-            # очищаем pending
             async with aiosqlite.connect(DB_NAME) as db:
-                await db.execute(
-                    "UPDATE users SET pending_days=NULL, in_chat=1 WHERE user_id=?",
-                    (user_id,)
-                )
+                await db.execute("""
+                    UPDATE users 
+                    SET pending_days=NULL, in_chat=1 
+                    WHERE user_id=?
+                """, (user_id,))
                 await db.commit()
 
-            # уведомление пользователю
             try:
                 await bot.send_message(
                     user_id,
@@ -566,7 +685,11 @@ async def card_confirm(call: CallbackQuery):
     plan = PLANS.get(plan_id)
 
     if not plan:
-        await call.message.answer("❌ Тариф не найден")
+        await call.answer("❌ Тариф не найден", show_alert=True)
+        return
+
+    if http_session is None:
+        await call.message.answer("❌ Сервис временно недоступен")
         await call.answer()
         return
 
@@ -574,15 +697,19 @@ async def card_confirm(call: CallbackQuery):
         transaction_id = None
         pay_url = None
 
-        # 1. проверяем есть ли уже платёж
+        # 1. ищем активный платёж
         async with aiosqlite.connect(DB_NAME) as db:
             async with db.execute(
-                "SELECT payload FROM card_invoices WHERE user_id=? AND plan_id=? AND status='pending'",
+                """
+                SELECT payload 
+                FROM card_invoices 
+                WHERE user_id=? AND plan_id=? AND status='pending'
+                """,
                 (call.from_user.id, plan_id)
             ) as cur:
                 existing = await cur.fetchone()
 
-        # 2. если есть — проверяем его живость
+        # 2. если есть — проверяем его
         if existing:
             transaction_id = existing[0]
 
@@ -600,7 +727,7 @@ async def card_confirm(call: CallbackQuery):
 
             pay_url = data.get("redirect")
 
-            # ❗ если ссылка умерла — помечаем и пересоздаём
+            # если платёж умер — чистим
             if not pay_url:
                 async with aiosqlite.connect(DB_NAME) as db:
                     await db.execute(
@@ -612,7 +739,7 @@ async def card_confirm(call: CallbackQuery):
                 transaction_id = None
                 pay_url = None
 
-        # 3. если нет живого платежа — создаём новый
+        # 3. создаём новый платёж
         if not transaction_id:
             payload = {
                 "paymentMethod": 2,
@@ -620,7 +747,7 @@ async def card_confirm(call: CallbackQuery):
                     "amount": float(plan["rub"]),
                     "currency": "RUB"
                 },
-                "description": f"TgId:{call.from_user.id}\nUserId:{call.from_user.id}"
+                "description": f"TgId:{call.from_user.id} | User:{call.from_user.id}"
             }
 
             async with http_session.post(
@@ -633,7 +760,7 @@ async def card_confirm(call: CallbackQuery):
                 json=payload
             ) as resp:
 
-                text = await resp.text()
+                raw_text = await resp.text()
 
                 try:
                     data = await resp.json()
@@ -645,24 +772,27 @@ async def card_confirm(call: CallbackQuery):
             pay_url = data.get("redirect")
 
             if not transaction_id or not pay_url:
-                await call.message.answer(f"❌ Ошибка Platega:\n{text}")
+                await call.message.answer(f"❌ Ошибка Platega:\n{raw_text}")
                 return
 
-            # сохраняем новый платеж
+            # сохраняем
             async with aiosqlite.connect(DB_NAME) as db:
                 await db.execute(
-                    "INSERT INTO card_invoices (payload, user_id, plan_id, status) VALUES (?, ?, ?, ?)",
+                    """
+                    INSERT INTO card_invoices (payload, user_id, plan_id, status)
+                    VALUES (?, ?, ?, ?)
+                    """,
                     (transaction_id, call.from_user.id, plan_id, "pending")
                 )
                 await db.commit()
 
-        # 4. UX БЛОК (ВАЖНО — ОН ВНУТРИ TRY)
+        # 4. UX
+        await call.answer("⏳ Создаём платёж...", show_alert=False)
+
         await call.message.edit_reply_markup(reply_markup=None)
-        await call.answer("⏳ Создаём платёж...")
 
         await call.message.edit_text(
-            "⏳ <b>Готовим платёж...</b>\n\n"
-            "Пожалуйста, подождите несколько секунд",
+            "⏳ <b>Готовим платёж...</b>\n\nПодождите пару секунд",
             parse_mode="HTML"
         )
 
@@ -689,48 +819,66 @@ async def crypto_confirm(call: CallbackQuery):
     plan = PLANS.get(plan_id)
 
     if not plan:
-        await call.message.answer("❌ Тариф не найден")
+        await call.answer("❌ Тариф не найден", show_alert=True)
+        return
+
+    if http_session is None:
+        await call.message.answer("❌ Сервис временно недоступен")
+        await call.answer()
         return
 
     try:
-        # 💡 создаём инвойс
         async with http_session.post(
             "https://pay.crypt.bot/api/createInvoice",
             headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
             json={
                 "asset": "USDT",
-                "amount": plan["crypto"],  # ❗ ЧИСЛО, НЕ строка
+                "amount": float(plan["crypto"]),
                 "description": f"Subscription {plan['name']}"
             }
         ) as response:
 
-            if response.status != 200:
+            # CryptoBot иногда отдаёт 201
+            if response.status not in (200, 201):
                 text = await response.text()
                 logger.error(f"Crypto HTTP error: {response.status} | {text}")
                 await call.message.answer("❌ Ошибка соединения с CryptoBot")
                 return
 
-            data = await response.json()
+            try:
+                data = await response.json()
+            except Exception:
+                text = await response.text()
+                logger.error(f"Crypto invalid JSON: {text}")
+                await call.message.answer("❌ Ошибка ответа CryptoBot")
+                return
 
-        # ❗ если API вернул ошибку
+        # ❗ проверка ответа API
         if not data.get("ok"):
             logger.error(f"Crypto API error: {data}")
             await call.message.answer("❌ Ошибка оплаты. Попробуйте позже")
             return
 
         result = data["result"]
-        pay_url = result["pay_url"]
-        invoice_id = str(result["invoice_id"])
 
-        # 💡 сохраняем инвойс
+        pay_url = result.get("pay_url")
+        invoice_id = str(result.get("invoice_id"))
+
+        if not pay_url or not invoice_id:
+            await call.message.answer("❌ Некорректный инвойс CryptoBot")
+            return
+
+        # 💾 сохраняем
         async with aiosqlite.connect(DB_NAME) as db:
             await db.execute(
-                "INSERT OR IGNORE INTO crypto_invoices (invoice_id, user_id, plan_id) VALUES (?, ?, ?)",
+                """
+                INSERT OR IGNORE INTO crypto_invoices (invoice_id, user_id, plan_id)
+                VALUES (?, ?, ?)
+                """,
                 (invoice_id, call.from_user.id, plan_id)
             )
             await db.commit()
 
-        # 🔥 UI
         text = (
             "<b>Проверьте детали платежа:</b>\n\n"
             f"📦 Тариф: {plan['name']}\n"
@@ -757,27 +905,37 @@ async def crypto_confirm(call: CallbackQuery):
 @router.callback_query(F.data == "ref")
 async def ref(call: CallbackQuery):
     user_data = await get_user(call.from_user.id)
-    ref_count = user_data[3] if user_data else 0
-    bonus_days = user_data[4] if user_data else 0
-    
+
+    ref_count = user_data[3] if user_data and user_data[3] else 0
+    bonus_days = user_data[4] if user_data and user_data[4] else 0
+
+    bot_username = (await bot.get_me()).username
+    ref_link = f"https://t.me/{bot_username}?start={call.from_user.id}"
+
     text = (
         "<b>👥 ПРИГЛАСИ ДРУГА — ПОЛУЧИ +7 ДНЕЙ!</b>\n\n"
         "Хочешь пользоваться закрытым каналом дольше и бесплатно? Участвуй в нашей реферальной программе!\n\n"
         "<b>Как это работает:</b>\n"
-        "1. Копируй свою уникальную ссылку ниже.\n"
+        "1. Копируй свою ссылку.\n"
         "2. Отправь её другу.\n"
-        "3. Как только твой друг <b>оплатит любую подписку</b>, тебе автоматически начислится <b>7 дней бесплатного доступа!</b>\n\n"
-        "<b>⚠️ Важное условие:</b>\n"
-        "Бонус начисляется только в том случае, если на момент приглашения у тебя есть активная подписка.\n\n"
+        "3. Как только друг <b>оплатит подписку</b>, тебе начислится <b>+7 дней</b>.\n\n"
+        "<b>⚠️ Условие:</b>\n"
+        "Бонус начисляется только при активной подписке.\n\n"
         f"<b>📊 Твоя статистика:</b>\n"
         f"Приглашено друзей: {ref_count}\n"
         f"Получено бонусов: +{bonus_days} дней\n\n"
-        "<b>Твоя ссылка для приглашения:</b>\n"
-        f"<code>https://t.me/{(await bot.get_me()).username}?start={call.from_user.id}</code>"
+        "<b>Твоя ссылка:</b>\n"
+        f"<code>{ref_link}</code>"
     )
-    await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
-    ]), parse_mode="HTML")
+
+    await call.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
+        ]),
+        parse_mode="HTML"
+    )
+
     await call.answer()
 
 # --- INFO ---
@@ -789,64 +947,92 @@ async def info(call: CallbackQuery):
         [InlineKeyboardButton(text="📜 Пользовательское соглашение", callback_data="terms")],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="back")]
     ])
-    await call.message.edit_text("ℹ️ Информация", reply_markup=kb)
+
+    try:
+        await call.message.edit_text("ℹ️ Информация", reply_markup=kb)
+    except TelegramBadRequest:
+        pass
+
     await call.answer()
+
 
 @router.callback_query(F.data == "privacy")
 async def privacy(call: CallbackQuery):
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅ Назад", callback_data="info")]])
-    await call.message.edit_text(PRIVACY_TEXT, reply_markup=kb)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="info")]
+    ])
+
+    try:
+        await call.message.edit_text(PRIVACY_TEXT, reply_markup=kb)
+    except TelegramBadRequest:
+        pass
+
     await call.answer()
+
 
 @router.callback_query(F.data == "terms")
 async def terms(call: CallbackQuery):
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅ Назад", callback_data="info")]])
-    await call.message.edit_text(TERMS_TEXT, reply_markup=kb)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="info")]
+    ])
+
+    try:
+        await call.message.edit_text(TERMS_TEXT, reply_markup=kb)
+    except TelegramBadRequest:
+        pass
+
     await call.answer()
 
 # --- PAYMENTS & JOIN ---
-JOIN_LINK = "https://t.me/+ffk7dB_5zPhkMWFk"
-ADMIN_ID = os.getenv("ADMIN_ID")
-if ADMIN_ID:
-    ADMIN_ID = int(ADMIN_ID)
+
+# лучше тянуть из env (гибкость)
+JOIN_LINK = os.getenv("JOIN_LINK", "https://t.me/+ffk7dB_5zPhkMWFk")
 
 @router.pre_checkout_query()
 async def pre_checkout(pre: PreCheckoutQuery):
     await pre.answer(ok=True)
 
+
 @router.message(F.successful_payment)
 async def success(message: Message):
     try:
-        payload = message.successful_payment.invoice_payload
+        payment = message.successful_payment
+        payload = payment.invoice_payload
 
-        # ⭐ только Stars
+        # 🔒 защита от мусорных payload
+        if not payload or "_" not in payload:
+            return
+
+        # ⭐ Stars only
         if not payload.startswith("stars_"):
             return
 
-        plan_id = payload.split("_")[1]
+        plan_id = payload.split("_", 1)[1]
         plan = PLANS.get(plan_id)
 
         if not plan:
             await message.answer("❌ Тариф не найден")
             return
 
+        user_id = message.from_user.id
         days = plan["days"]
 
-        # 🎯 начисляем подписку
-        await extend_user(message.from_user.id, days)
+        # 🎯 начисление подписки
+        await extend_user(user_id, days)
 
-        # 🔔 УВЕДОМЛЕНИЕ АДМИНУ (ЕДИНЫЙ ФОРМАТ)
+        # 🔔 уведомление админу
         if ADMIN_ID:
             try:
                 await notify_admin(
-                    user_id=message.from_user.id,
+                    user_id=user_id,
                     plan_name=plan["name"],
-                    method="Stars ⭐"
+                    method="Stars ⭐",
+                    extra=f"💳 Payment ID: {payment.provider_payment_charge_id}"
                 )
             except Exception as admin_err:
                 logging.error(f"Admin notification error: {admin_err}")
 
-        # 🔥 выдаём ссылку
+        # 🔥 кнопка входа
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(
                 text="📢 Вступить в закрытый канал",
@@ -871,6 +1057,7 @@ async def success(message: Message):
             "❌ Ошибка обработки оплаты. Напишите в поддержку.",
             parse_mode="HTML"
         )
+
 # --- BACKGROUND TASKS ---
 
 JOIN_LINK = "https://t.me/+ffk7dB_5zPhkMWFk"
@@ -905,13 +1092,19 @@ async def card_checker():
                     if status not in ("CONFIRMED", "SUCCESS", "PAID"):
                         continue
 
+                    # 🔒 атомарно помечаем как оплачено (чтобы не задвоило выдачу)
                     async with aiosqlite.connect(DB_NAME) as db:
                         cursor = await db.execute(
-                            "UPDATE card_invoices SET status='paid' WHERE payload=? AND status='pending'",
+                            """
+                            UPDATE card_invoices
+                            SET status='paid'
+                            WHERE payload=? AND status='pending'
+                            """,
                             (transaction_id,)
                         )
                         await db.commit()
 
+                    # ⚠️ важно: проверка должна быть ДО commit логики
                     if cursor.rowcount == 0:
                         continue
 
@@ -920,7 +1113,7 @@ async def card_checker():
                     # 🎯 начисляем подписку
                     await extend_user(user_id, days)
 
-                    # 🔔 УВЕДОМЛЕНИЕ АДМИНУ (ИСПРАВЛЕНО)
+                    # 🔔 УВЕДОМЛЕНИЕ АДМИНУ
                     if ADMIN_ID:
                         try:
                             await notify_admin(
@@ -978,14 +1171,12 @@ async def crypto_checker():
                         params={"invoice_ids": inv_id}
                     ) as resp:
 
-                        # ❗ если API умер — пропускаем
                         if resp.status != 200:
                             logger.error(f"Crypto HTTP error: {resp.status}")
                             continue
 
                         data = await resp.json()
 
-                    # ❗ если API вернул ошибку
                     if not data.get("ok"):
                         logger.error(f"Crypto API error: {data}")
                         continue
@@ -994,20 +1185,25 @@ async def crypto_checker():
                     if not items:
                         continue
 
-                    status = items[0].get("status")
+                    item = items[0]
+                    status = str(item.get("status", "")).lower()
 
-                    # ⛔ обрабатываем ТОЛЬКО paid
+                    # ⛔ строго ждём paid
                     if status != "paid":
                         continue
 
+                    # 🔒 атомарное обновление (защита от дубля)
                     async with aiosqlite.connect(DB_NAME) as db:
                         cursor = await db.execute(
-                            "UPDATE crypto_invoices SET status='paid' WHERE invoice_id=? AND status='pending'",
+                            """
+                            UPDATE crypto_invoices
+                            SET status='paid'
+                            WHERE invoice_id=? AND status='pending'
+                            """,
                             (inv_id,)
                         )
                         await db.commit()
 
-                    # 💡 если уже обработано — выходим
                     if cursor.rowcount == 0:
                         continue
 
@@ -1060,27 +1256,62 @@ async def check_subscriptions():
     while True:
         try:
             async with aiosqlite.connect(DB_NAME) as db:
-                async with db.execute("SELECT user_id, expiry FROM users WHERE expiry IS NOT NULL") as cur:
+                async with db.execute(
+                    "SELECT user_id, expiry FROM users WHERE expiry IS NOT NULL"
+                ) as cur:
                     users = await cur.fetchall()
 
             now = datetime.now(timezone.utc)
+
             for user_id, expiry_str in users:
-                expiry_dt = datetime.fromisoformat(expiry_str).replace(tzinfo=timezone.utc)
-                if now > expiry_dt:
+                try:
+                    if not expiry_str:
+                        continue
+
+                    expiry_dt = datetime.fromisoformat(expiry_str).replace(tzinfo=timezone.utc)
+
+                    # ⛔ ещё активен — пропускаем
+                    if now <= expiry_dt:
+                        continue
+
+                    # 🚫 удаляем из канала
                     try:
                         await bot.ban_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
                         await bot.unban_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
-                        async with aiosqlite.connect(DB_NAME) as db:
-                            await db.execute("UPDATE users SET expiry = NULL WHERE user_id = ?", (user_id,))
-                            await db.commit()
-                        await bot.send_message(user_id, "❌ Срок вашей подписки истёк. Вы были удалены из канала. Чтобы вернуться, оплатите подписку снова.")
                     except TelegramBadRequest as e:
-                        if "user is not found in the chat" not in e.message:
+                        # если пользователя уже нет в чате — просто игнор
+                        if "user is not found in the chat" not in str(e):
                             logging.error(f"Error banning user {user_id}: {e}")
+
+                    # 🧹 чистим подписку
+                    async with aiosqlite.connect(DB_NAME) as db:
+                        await db.execute(
+                            "UPDATE users SET expiry = NULL WHERE user_id = ?",
+                            (user_id,)
+                        )
+                        await db.commit()
+
+                    # 📩 уведомление пользователю
+                    try:
+                        await bot.send_message(
+                            user_id,
+                            "❌ Срок вашей подписки истёк.\n\n"
+                            "Вы были удалены из канала.\n"
+                            "Чтобы вернуться — просто оплатите подписку снова."
+                        )
+                    except Exception as e:
+                        logging.error(f"Notify user error {user_id}: {e}")
+
+                except Exception as e:
+                    logging.error(f"User expiry check error {user_id}: {e}")
+
         except Exception as e:
             logging.error(f"Subscription checker error: {e}")
-        await asyncio.sleep(3600)
 
+        await asyncio.sleep(1200)
+      
+        
+        
 async def main():
     global http_session
 
@@ -1089,6 +1320,7 @@ async def main():
 
     loop = asyncio.get_running_loop()
 
+    # 🧠 фоновые задачи
     tasks.append(loop.create_task(crypto_checker()))
     tasks.append(loop.create_task(card_checker()))
     tasks.append(loop.create_task(check_subscriptions()))
@@ -1097,15 +1329,23 @@ async def main():
         await dp.start_polling(bot)
 
     finally:
-        # 🔥 ВАЖНО: гасим фоновые задачи
+        # 🔥 мягкая остановка задач
         for task in tasks:
             task.cancel()
 
+        # ⛑ ждём корректного завершения всех задач
         await asyncio.gather(*tasks, return_exceptions=True)
 
-        # закрываем HTTP
+        # 🌐 закрытие HTTP клиента
         if http_session and not http_session.closed:
             await http_session.close()
 
+        # 🤖 закрытие бота (важно для aiogram стабильности)
+        await bot.session.close()
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
