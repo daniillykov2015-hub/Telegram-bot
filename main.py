@@ -609,6 +609,33 @@ async def show_lang_menu_callback(call: CallbackQuery):
     await call.answer()
 
 # ================== HANDLERS ==================
+# --- ADMIN BROADCAST ---
+@router.message(F.text.startswith("/broadcast"), F.from_user.id == ADMIN_ID)
+async def start_broadcast(message: Message, bot: Bot):
+    # Извлекаем текст сообщения (все, что идет после команды /broadcast)
+    broadcast_text = message.text.replace("/broadcast", "").strip()
+    
+    if not broadcast_text:
+        await message.answer("❌ <b>Ошибка:</b> Введите текст после команды.\nПример: <code>/broadcast Привет!</code>")
+        return
+
+    # Получаем список всех ID пользователей из базы данных
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("SELECT user_id FROM users") as cursor:
+            users = await cursor.fetchall()
+    
+    count = 0
+    # Отправляем сообщение каждому пользователю
+    for (user_id,) in users:
+        try:
+            await bot.send_message(user_id, broadcast_text, parse_mode="HTML")
+            count += 1
+        except Exception:
+            # Если пользователь заблокировал бота, просто идем дальше
+            continue
+            
+    await message.answer(f"✅ <b>Рассылка завершена!</b>\nОтправлено: {count} пользователям.")
+
 @router.callback_query(F.data.startswith("lang:"))
 async def set_lang(call: CallbackQuery):
     lang = call.data.split(":")[1]
