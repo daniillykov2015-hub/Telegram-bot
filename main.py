@@ -15,6 +15,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     LabeledPrice,
     PreCheckoutQuery,
+    ChatMemberUpdated,
 )
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
