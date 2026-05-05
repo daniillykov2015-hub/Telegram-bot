@@ -35,7 +35,7 @@ MERCHANT_ID = os.getenv("PLATEGA_MERCHANT_ID")
 
 ADMIN_ID = os.getenv("ADMIN_ID")
 
-# --- VALIDATION ---
+# --- SAFE VALIDATION (FIX CRASHES) ---
 required_vars = {
     "TELEGRAM_BOT_TOKEN": BOT_TOKEN,
     "CRYPTO_TOKEN": CRYPTO_TOKEN,
@@ -45,13 +45,13 @@ required_vars = {
 }
 
 missing = [k for k, v in required_vars.items() if not v]
-
 if missing:
-    raise ValueError(f"Missing env vars: {', '.join(missing)}")
+    raise RuntimeError(f"Missing env vars: {', '.join(missing)}")
 
-# --- TYPES ---
+# --- SAFE CONVERSIONS ---
 CHANNEL_ID = int(CHANNEL_ID)
-ADMIN_ID = int(ADMIN_ID) if ADMIN_ID else None
+
+ADMIN_ID = int(ADMIN_ID) if ADMIN_ID and str(ADMIN_ID).isdigit() else None
 
 # --- DB ---
 DB_NAME = "users.db"
