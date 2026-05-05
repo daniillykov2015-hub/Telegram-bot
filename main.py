@@ -627,30 +627,40 @@ async def set_lang(call: CallbackQuery):
     )
 
     await call.answer()
+
 # --- STARS MENU ---
 @router.callback_query(F.data == "stars")
 async def stars_menu(call: CallbackQuery):
     lang = await get_lang(call.from_user.id)
 
+    # Тексты для меню Stars
     text_map = {
-        "ru": "⭐ Выберите тариф:",
-        "en": "⭐ Choose a plan:",
-        "es": "⭐ Elige un plan:",
-        "de": "⭐ Tarif wählen:",
-        "fr": "⭐ Choisissez une offre:"
+        "ru": "⭐ <b>Оплата Telegram Stars</b>\n\nВыберите тариф ниже. Доступ будет предоставлен мгновенно после оплаты.",
+        "en": "⭐ <b>Telegram Stars Payment</b>\n\nChoose a plan below. Access will be granted instantly after payment.",
+        "es": "⭐ <b>Pago con Telegram Stars</b>\n\nElija un plan a continuación.",
+        "de": "⭐ <b>Zahlung mit Telegram Stars</b>\n\nWählen Sie einen Tarif aus.",
+        "fr": "⭐ <b>Paiement Telegram Stars</b>\n\nChoisissez une offre ci-dessous."
     }
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
+    # Формируем кнопки тарифов для Stars (используем те же PLANS, но для звезд)
+    kb_list = [
         [InlineKeyboardButton(
             text=f"{p['name']} — {p['stars']} ⭐",
             callback_data=f"stars_confirm:{k}"
         )]
         for k, p in PLANS.items()
-    ] + [[InlineKeyboardButton(text="⬅ Back", callback_data="back")]])
+    ]
+    
+    kb_list.append([InlineKeyboardButton(text="⬅ Back", callback_data="back")])
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=kb_list)
 
-    await call.message.edit_text(text_map.get(lang, text_map["en"]), reply_markup=kb)
+    await call.message.edit_text(
+        text_map.get(lang, text_map["en"]),
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
     await call.answer()
-
 
 # --- STARS CONFIRM ---
 @router.callback_query(F.data.startswith("stars_confirm:"))
