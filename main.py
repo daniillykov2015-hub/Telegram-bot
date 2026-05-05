@@ -528,7 +528,23 @@ async def get_or_create_invite(user_id: int, days: int):
 
         return link
 # ================== HANDLERS ==================
+@router.callback_query(F.data.startswith("lang:"))
+async def set_lang(call: CallbackQuery):
+    lang = call.data.split(":")[1]
 
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            "UPDATE users SET language=? WHERE user_id=?",
+            (lang, call.from_user.id)
+        )
+        await db.commit()
+
+    await call.message.edit_text(
+        TEXTS[lang]["main"],
+        reply_markup=await main_menu_kb(call.from_user.id)
+    )
+
+    await call.answer()
 # --- STARS MENU ---
 @router.callback_query(F.data == "stars")
 async def stars_menu(call: CallbackQuery):
@@ -622,23 +638,55 @@ async def start(message: Message):
     args = message.text.split()
 
     async with aiosqlite.connect(DB_NAME) as db:
+
+        # 👤 создаём пользователя (без языка по умолчанию!)
         await db.execute(
-            "INSERT OR IGNORE INTO users (user_id, language) VALUES (?, 'en')",
+            "INSERT OR IGNORE INTO users (user_id) VALUES (?)",
             (user_id,)
         )
 
+        # 👥 рефералка
         if len(args) > 1 and args[1].isdigit():
             referrer = int(args[1])
+
             if referrer != user_id:
                 await db.execute(
-                    "UPDATE users SET referrer=? WHERE user_id=? AND referrer IS NULL",
+                    """
+                    UPDATE users 
+                    SET referrer=? 
+                    WHERE user_id=? AND referrer IS NULL
+                    """,
                     (referrer, user_id)
                 )
 
         await db.commit()
 
+    # 🌍 проверяем язык
     lang = await get_lang(user_id)
 
+    user = await get_user(user_id)
+
+    # ❗ если язык ещё не выбран → показываем выбор
+    if not user or not user[7]:
+        await message.answer(
+            "🌍 Choose language / Выберите язык",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang:ru"),
+                    InlineKeyboardButton(text="🇬🇧 English", callback_data="lang:en"),
+                ],
+                [
+                    InlineKeyboardButton(text="🇪🇸 Español", callback_data="lang:es"),
+                    InlineKeyboardButton(text="🇩🇪 Deutsch", callback_data="lang:de"),
+                ],
+                [
+                    InlineKeyboardButton(text="🇫🇷 Français", callback_data="lang:fr"),
+                ]
+            ])
+        )
+        return
+
+    # ✅ если язык уже есть → обычный старт
     await message.answer(
         TEXTS[lang]["main"],
         reply_markup=await main_menu_kb(user_id)
@@ -1175,8 +1223,9 @@ async def success(message: Message):
     except Exception as e:
         logging.error(f"Stars success error: {e}")
         await message.answer("❌ Error processing payment")
-JOIN_LINK = "https://t.me/+ffk7dB_5zPhkMWFk"
 
+
+JOIN_LINK = "https://t.me/+ffk7dB_5zPhkMWFk"
 
 async def card_checker():
     while True:
