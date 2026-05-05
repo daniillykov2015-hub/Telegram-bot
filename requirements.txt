@@ -2,3 +2,4 @@ aiogram==3.27.0
 aiohttp
 requests
 aiosqlite
+apscheduler
