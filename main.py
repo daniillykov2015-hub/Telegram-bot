@@ -1546,3 +1546,6 @@ async def main():
         await bot.session.close()
 
         logger.info("Bot stopped cleanly")
+
+if __name__ == "__main__":
+    asyncio.run(main())
