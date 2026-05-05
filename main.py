@@ -442,7 +442,6 @@ KB_TEXTS = {
 
 
 # --- главное меню ---
-# --- главное меню ---
 async def main_menu_kb(user_id: int):
     lang = await get_lang(user_id)
     t = KB_TEXTS.get(lang, KB_TEXTS["en"])
@@ -587,30 +586,61 @@ async def stars_confirm(call: CallbackQuery):
     plan = PLANS.get(plan_id)
 
     if not plan:
-        await call.message.answer("❌ Error")
+        await call.answer("❌ Error", show_alert=True)
         return
 
-    invoice_link = await bot.create_invoice_link(
-        title="Subscription",
-        description=f"Access for {plan['name']}",
-        payload=f"stars_{plan_id}",
-        provider_token="",
-        currency="XTR",
-        prices=[LabeledPrice(label="Stars", amount=plan["stars"])]
-    )
+    try:
+        invoice_link = await bot.create_invoice_link(
+            title="Subscription",
+            description=f"Access for {plan['name']}",
+            payload=f"stars_{plan_id}",
+            provider_token="",
+            currency="XTR",
+            prices=[LabeledPrice(label="Stars", amount=plan["stars"])]
+        )
+    except Exception as e:
+        await call.answer("❌ Invoice error", show_alert=True)
+        return
 
-    text = (
-        f"📦 {plan['name']}\n"
-        f"💰 {plan['stars']} ⭐\n\n"
-        "👇 Continue payment"
-    )
+    text_map = {
+        "ru": (
+            f"📦 <b>{plan['name']}</b>\n"
+            f"💰 {plan['stars']} ⭐\n\n"
+            "👇 Нажмите кнопку ниже для оплаты"
+        ),
+        "en": (
+            f"📦 <b>{plan['name']}</b>\n"
+            f"💰 {plan['stars']} ⭐\n\n"
+            "👇 Click the button below to pay"
+        ),
+        "es": (
+            f"📦 <b>{plan['name']}</b>\n"
+            f"💰 {plan['stars']} ⭐\n\n"
+            "👇 Haz clic para pagar"
+        ),
+        "de": (
+            f"📦 <b>{plan['name']}</b>\n"
+            f"💰 {plan['stars']} ⭐\n\n"
+            "👇 Klicke zum Bezahlen"
+        ),
+        "fr": (
+            f"📦 <b>{plan['name']}</b>\n"
+            f"💰 {plan['stars']} ⭐\n\n"
+            "👇 Cliquez pour payer"
+        ),
+    }
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💸 Pay", url=invoice_link)],
         [InlineKeyboardButton(text="⬅ Back", callback_data="stars")]
     ])
 
-    await call.message.edit_text(text, reply_markup=kb)
+    await call.message.edit_text(
+        text_map.get(lang, text_map["en"]),
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+
     await call.answer()
 
 
