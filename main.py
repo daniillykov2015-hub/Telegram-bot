@@ -1638,69 +1638,71 @@ async def crypto_checker():
 async def check_subscriptions():
     while True:
         try:
+            # Открываем базу один раз для всего цикла проверки
             async with aiosqlite.connect(DB_NAME) as db:
                 async with db.execute(
                     "SELECT user_id, expiry FROM users WHERE expiry IS NOT NULL"
                 ) as cur:
                     users = await cur.fetchall()
 
-            now = datetime.now(timezone.utc)
+                now = datetime.now(timezone.utc)
 
-            for user_id, expiry_str in users:
-                try:
-                    if not expiry_str:
-                        continue
-
-                    expiry_dt = datetime.fromisoformat(expiry_str)
-
-                    if expiry_dt.tzinfo is None:
-                        expiry_dt = expiry_dt.replace(tzinfo=timezone.utc)
-
-                    if now <= expiry_dt:
-                        continue
-
-                    # ❌ доступ истёк → удаляем из канала
+                for user_id, expiry_str in users:
                     try:
-                        await bot.ban_chat_member(
-                            chat_id=CHANNEL_ID,
-                            user_id=user_id,
-                            revoke_messages=False
-                        )
+                        if not expiry_str:
+                            continue
 
-                        await asyncio.sleep(0.3)
+                        expiry_dt = datetime.fromisoformat(expiry_str)
+                        if expiry_dt.tzinfo is None:
+                            expiry_dt = expiry_dt.replace(tzinfo=timezone.utc)
 
-                        await bot.unban_chat_member(
-                            chat_id=CHANNEL_ID,
-                            user_id=user_id
-                        )
+                        if now <= expiry_dt:
+                            continue
 
-                    except TelegramBadRequest as e:
-                        if "not found" not in str(e).lower():
-                            logger.error(f"Ban error {user_id}: {e}")
+                        # ❌ Доступ истёк → удаляем из канала
+                        try:
+                            # Убираем из канала
+                            await bot.ban_chat_member(
+                                chat_id=CHANNEL_ID,
+                                user_id=user_id,
+                                revoke_messages=False
+                            )
+                            # Сразу разбаниваем, чтобы мог зайти снова после оплаты
+                            await asyncio.sleep(0.2) 
+                            await bot.unban_chat_member(
+                                chat_id=CHANNEL_ID,
+                                user_id=user_id
+                            )
+                        except TelegramBadRequest as e:
+                            if "not found" not in str(e).lower():
+                                logger.error(f"Ban error {user_id}: {e}")
 
-                    async with aiosqlite.connect(DB_NAME) as db:
+                        # Обновляем БД (используем уже открытое соединение 'db')
                         await db.execute(
                             "UPDATE users SET expiry=NULL WHERE user_id=?",
                             (user_id,)
                         )
                         await db.commit()
 
-                    try:
-                        await bot.send_message(
-                            user_id,
-                            "❌ Подписка закончилась.\n"
-                            "Вы были удалены из доступа.\n"
-                            "Оплатите подписку снова."
-                        )
-                    except:
-                        pass
+                        # Уведомляем пользователя
+                        try:
+                            await bot.send_message(
+                                user_id,
+                                "❌ Подписка закончилась.\n"
+                                "Вы были удалены из канала.\n"
+                                "Оплатите подписку снова, чтобы вернуть доступ."
+                            )
+                        except Exception:
+                            # Если заблокировал бота — просто игнорируем
+                            pass
 
-                except Exception as e:
-                    logger.error(f"User check error {user_id}: {e}")
+                    except Exception as e:
+                        logger.error(f"User check error {user_id}: {e}")
 
         except Exception as e:
             logger.error(f"Subscription checker error: {e}")
 
+        # Проверка раз в час
         await asyncio.sleep(3600)
 
 
