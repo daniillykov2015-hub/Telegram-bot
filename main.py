@@ -1439,6 +1439,7 @@ async def crypto_checker():
 
         await asyncio.sleep(15)
 
+# ================== SUBSCRIPTION CHECKER ==================
 async def check_subscriptions():
     while True:
         try:
@@ -1455,12 +1456,15 @@ async def check_subscriptions():
                     if not expiry_str:
                         continue
 
-                    expiry_dt = datetime.fromisoformat(expiry_str).replace(tzinfo=timezone.utc)
+                    expiry_dt = datetime.fromisoformat(expiry_str)
+
+                    if expiry_dt.tzinfo is None:
+                        expiry_dt = expiry_dt.replace(tzinfo=timezone.utc)
 
                     if now <= expiry_dt:
                         continue
 
-                    # 🔒 кик только если реально истёк
+                    # ❌ доступ истёк → удаляем из канала
                     try:
                         await bot.ban_chat_member(
                             chat_id=CHANNEL_ID,
@@ -1468,7 +1472,6 @@ async def check_subscriptions():
                             revoke_messages=False
                         )
 
-                        # маленькая задержка, чтобы Telegram успел применить бан
                         await asyncio.sleep(0.3)
 
                         await bot.unban_chat_member(
@@ -1477,13 +1480,12 @@ async def check_subscriptions():
                         )
 
                     except TelegramBadRequest as e:
-                        # уже не в чате — это нормально
-                        if "user is not found in the chat" not in str(e).lower():
-                            logging.error(f"Ban error {user_id}: {e}")
+                        if "not found" not in str(e).lower():
+                            logger.error(f"Ban error {user_id}: {e}")
 
                     async with aiosqlite.connect(DB_NAME) as db:
                         await db.execute(
-                            "UPDATE users SET expiry = NULL WHERE user_id = ?",
+                            "UPDATE users SET expiry=NULL WHERE user_id=?",
                             (user_id,)
                         )
                         await db.commit()
@@ -1491,58 +1493,56 @@ async def check_subscriptions():
                     try:
                         await bot.send_message(
                             user_id,
-                            "❌ Подписка закончилась.\n\n"
+                            "❌ Подписка закончилась.\n"
                             "Вы были удалены из доступа.\n"
-                            "Чтобы вернуться — оплатите подписку снова."
+                            "Оплатите подписку снова."
                         )
                     except:
                         pass
 
                 except Exception as e:
-                    logging.error(f"User check error {user_id}: {e}")
+                    logger.error(f"User check error {user_id}: {e}")
 
         except Exception as e:
-            logging.error(f"Subscription checker error: {e}")
+            logger.error(f"Subscription checker error: {e}")
 
         await asyncio.sleep(3600)
 
+
+# ================== MAIN ==================
 async def main():
     global http_session
 
-    http_session = aiohttp.ClientSession()
-
-    await init_db()
-
-    loop = asyncio.get_running_loop()
-
-    # 🚀 запуск фоновых задач
-    crypto_task = loop.create_task(crypto_checker(), name="crypto_checker")
-    card_task = loop.create_task(card_checker(), name="card_checker")
-    sub_task = loop.create_task(check_subscriptions(), name="subscription_checker")
-
-    tasks.extend([crypto_task, card_task, sub_task])
-
-    logging.info("Bot started successfully")
-
     try:
+        http_session = aiohttp.ClientSession()
+
+        await init_db()
+
+        loop = asyncio.get_running_loop()
+
+        # фоновые задачи
+        tasks.append(loop.create_task(crypto_checker(), name="crypto_checker"))
+        tasks.append(loop.create_task(card_checker(), name="card_checker"))
+        tasks.append(loop.create_task(check_subscriptions(), name="subscription_checker"))
+
+        logger.info("Bot started successfully")
+
         await dp.start_polling(bot)
 
-    finally:
-        logging.info("Shutting down bot...")
+    except Exception as e:
+        logger.exception(f"FATAL ERROR IN MAIN: {e}")
 
-        # 🔥 отмена задач
+    finally:
+        logger.info("Shutting down...")
+
         for task in tasks:
             task.cancel()
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(*tasks, return_exceptions=True)
 
-        # 📌 логируем ошибки задач (очень важно)
-        for r in results:
-            if isinstance(r, Exception):
-                logging.error(f"Background task error: {r}")
-
-        # закрытие HTTP сессии
         if http_session and not http_session.closed:
             await http_session.close()
 
-        logging.info("Bot stopped cleanly")
+        await bot.session.close()
+
+        logger.info("Bot stopped cleanly")
