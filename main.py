@@ -8,26 +8,26 @@ from datetime import datetime, timedelta, timezone
 
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.filters import CommandStart
-from aiogram.types import *
+from aiogram.types import (
+    Message, CallbackQuery,
+    InlineKeyboardMarkup, InlineKeyboardButton,
+    LabeledPrice, PreCheckoutQuery,
+    ChatMemberUpdated
+)
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
 from aiogram.exceptions import TelegramBadRequest
 
-# ================= CONFIG =================
-
+# ================== CONFIG ==================
 logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("bot")
+log = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CRYPTO_TOKEN = os.getenv("CRYPTO_TOKEN")
 CHANNEL_ID = int(os.getenv("TELEGRAM_GROUP_ID"))
-
 PAYMENT_TOKEN = os.getenv("PLATEGA_API_KEY")
 MERCHANT_ID = os.getenv("PLATEGA_MERCHANT_ID")
-
-ADMIN_ID = os.getenv("ADMIN_ID")
-if ADMIN_ID:
-    ADMIN_ID = int(ADMIN_ID)
+ADMIN_ID = int(os.getenv("ADMIN_ID")) if os.getenv("ADMIN_ID") else None
 
 DB = "users.db"
 
@@ -39,72 +39,71 @@ dp.include_router(router)
 http = None
 tasks = []
 
-# ================= LANG =================
+# ================== LANG ==================
+LANGS = ["ru", "en", "es", "de", "fr"]
 
-LANGS = ["ru", "en", "de", "es", "fr"]
-
-WELCOME = {
-    "ru": "👋 Привет! Это закрытый канал\n\nВыбери оплату 👇",
-    "en": "👋 Hi! Private channel\n\nChoose payment 👇",
-    "de": "👋 Hallo! Privater Kanal\n\nZahlung wählen 👇",
-    "es": "👋 Hola! Canal privado\n\nElige pago 👇",
-    "fr": "👋 Salut! Canal privé\n\nChoisir paiement 👇",
+TEXTS = {
+"ru": {
+"start": "👋 Привет! Закрытый канал",
+"choose": "Выбери оплату:",
+"back": "⬅ Назад"
+},
+"en": {
+"start": "👋 Welcome to private channel",
+"choose": "Choose payment:",
+"back": "⬅ Back"
+},
+"es": {
+"start": "👋 Canal privado",
+"choose": "Elige pago:",
+"back": "⬅ Volver"
+},
+"de": {
+"start": "👋 Privater Kanal",
+"choose": "Zahlung wählen:",
+"back": "⬅ Zurück"
+},
+"fr": {
+"start": "👋 Canal privé",
+"choose": "Choisissez paiement:",
+"back": "⬅ Retour"
+}
 }
 
-# ================= TEXTS =================
-
-PRIVACY = """Политика конфиденциальности...
-(оставил твой полный текст без изменений)"""
-
-TERMS = """Пользовательское соглашение...
-(оставил твой полный текст без изменений)"""
-
-# ================= PLANS =================
-
+# ================== PLANS ==================
 PLANS = {
-    "1": {"name": "1 day", "days": 1, "rub": 690, "stars": 790, "crypto": 9},
-    "7": {"name": "7 days", "days": 7, "rub": 1690, "stars": 1790, "crypto": 22},
-    "30": {"name": "30 days", "days": 30, "rub": 3390, "stars": 3490, "crypto": 46},
+"1": {"name": "1 day", "days": 1, "rub": 690, "stars": 790, "crypto": 9},
+"7": {"name": "7 days", "days": 7, "rub": 1690, "stars": 1790, "crypto": 22},
+"30": {"name": "30 days", "days": 30, "rub": 3390, "stars": 3490, "crypto": 46},
 }
 
-# ================= DB =================
-
+# ================== DB ==================
 async def db_init():
     async with aiosqlite.connect(DB) as db:
-        await db.execute("""
+        await db.executescript("""
         CREATE TABLE IF NOT EXISTS users(
             user_id INTEGER PRIMARY KEY,
             expiry TEXT,
+            ref INTEGER,
             lang TEXT DEFAULT 'ru',
-            referrer INTEGER,
-            ref_count INTEGER DEFAULT 0,
-            bonus INTEGER DEFAULT 0,
-            pending INTEGER
-        )
-        """)
-
-        await db.execute("""
-        CREATE TABLE IF NOT EXISTS crypto(
-            id TEXT PRIMARY KEY,
-            user_id INTEGER,
-            plan TEXT,
-            status TEXT
-        )
-        """)
-
-        await db.execute("""
+            pending_days INTEGER
+        );
         CREATE TABLE IF NOT EXISTS card(
             id TEXT PRIMARY KEY,
             user_id INTEGER,
             plan TEXT,
             status TEXT
-        )
+        );
+        CREATE TABLE IF NOT EXISTS crypto(
+            id TEXT PRIMARY KEY,
+            user_id INTEGER,
+            plan TEXT,
+            status TEXT
+        );
         """)
-
         await db.commit()
 
-# ================= USER =================
-
+# ================== HELPERS ==================
 async def get_lang(uid):
     async with aiosqlite.connect(DB) as db:
         async with db.execute("SELECT lang FROM users WHERE user_id=?", (uid,)) as c:
@@ -113,193 +112,136 @@ async def get_lang(uid):
 
 async def set_lang(uid, lang):
     async with aiosqlite.connect(DB) as db:
-        await db.execute("""
-        INSERT INTO users(user_id, lang)
-        VALUES(?, ?)
-        ON CONFLICT(user_id) DO UPDATE SET lang=excluded.lang
-        """, (uid, lang))
+        await db.execute("INSERT OR IGNORE INTO users(user_id) VALUES(?)", (uid,))
+        await db.execute("UPDATE users SET lang=? WHERE user_id=?", (lang, uid))
         await db.commit()
 
-# ================= SUB =================
-
-async def add_sub(uid, days):
+async def extend(uid, days):
     async with aiosqlite.connect(DB) as db:
+        cur = await db.execute("SELECT expiry FROM users WHERE user_id=?", (uid,))
+        row = await cur.fetchone()
+
         now = datetime.now(timezone.utc)
+        base = now
 
-        async with db.execute("SELECT expiry FROM users WHERE user_id=?", (uid,)) as c:
-            r = await c.fetchone()
-
-        if r and r[0]:
-            exp = datetime.fromisoformat(r[0])
-            base = max(now, exp)
-        else:
-            base = now
+        if row and row[0]:
+            old = datetime.fromisoformat(row[0])
+            base = max(now, old)
 
         new = base + timedelta(days=days)
 
         await db.execute("""
         INSERT INTO users(user_id, expiry)
-        VALUES(?, ?)
-        ON CONFLICT(user_id)
-        DO UPDATE SET expiry=excluded.expiry
+        VALUES(?,?)
+        ON CONFLICT(user_id) DO UPDATE SET expiry=excluded.expiry
         """, (uid, new.isoformat()))
-
         await db.commit()
 
-# ================= UI =================
+# ================== KEYBOARDS ==================
+def lang_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=l.upper(), callback_data=f"lang:{l}")]
+        for l in LANGS
+    ])
 
-def kb_main():
+def main_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💳 Card", callback_data="card")],
         [InlineKeyboardButton(text="⭐ Stars", callback_data="stars")],
         [InlineKeyboardButton(text="💰 Crypto", callback_data="crypto")],
-        [InlineKeyboardButton(text="🌍 Language", callback_data="lang")]
+        [InlineKeyboardButton(text="🌍 Lang", callback_data="lang_menu")]
     ])
 
-def kb_lang():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton("RU", callback_data="l:ru")],
-        [InlineKeyboardButton("EN", callback_data="l:en")],
-        [InlineKeyboardButton("DE", callback_data="l:de")],
-        [InlineKeyboardButton("ES", callback_data="l:es")],
-        [InlineKeyboardButton("FR", callback_data="l:fr")]
-    ])
-
-# ================= START =================
-
+# ================== START ==================
 @router.message(CommandStart())
 async def start(m: Message):
+    uid = m.from_user.id
+
     async with aiosqlite.connect(DB) as db:
-        await db.execute("INSERT OR IGNORE INTO users(user_id) VALUES(?)", (m.from_user.id,))
+        await db.execute("INSERT OR IGNORE INTO users(user_id) VALUES(?)", (uid,))
         await db.commit()
 
-    lang = await get_lang(m.from_user.id)
-    await m.answer(WELCOME[lang], reply_markup=kb_main())
+    lang = await get_lang(uid)
+    await m.answer(TEXTS[lang]["start"], reply_markup=main_kb())
 
-# ================= LANG =================
-
-@router.callback_query(F.data == "lang")
+# ================== LANG ==================
+@router.callback_query(F.data == "lang_menu")
 async def lang_menu(c: CallbackQuery):
-    await c.message.edit_text("🌍 Choose language", reply_markup=kb_lang())
+    await c.message.edit_text("🌍 Language:", reply_markup=lang_kb())
+    await c.answer()
 
-@router.callback_query(F.data.startswith("l:"))
-async def set_l(c: CallbackQuery):
+@router.callback_query(F.data.startswith("lang:"))
+async def lang_set(c: CallbackQuery):
     lang = c.data.split(":")[1]
     await set_lang(c.from_user.id, lang)
-    await c.message.edit_text("✅ Done", reply_markup=kb_main())
+    await c.message.edit_text("✅ OK", reply_markup=main_kb())
 
-# ================= REF =================
-
-async def apply_ref(uid, ref):
-    if uid == ref:
-        return
-
-    async with aiosqlite.connect(DB) as db:
-        await db.execute("""
-        UPDATE users SET referrer=?
-        WHERE user_id=? AND referrer IS NULL
-        """, (ref, uid))
-        await db.commit()
-
-# ================= PAYMENTS =================
-
+# ================== PAY MENU ==================
+@router.callback_query(F.data == "card")
+@router.callback_query(F.data == "stars")
 @router.callback_query(F.data == "crypto")
-async def crypto_menu(c: CallbackQuery):
+async def pay_menu(c: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(f"{p['name']} {p['crypto']}$", callback_data=f"c:{k}")]
+        [InlineKeyboardButton(text=f"{p['name']} {p['rub']}₽", callback_data=f"pay:{k}")]
         for k, p in PLANS.items()
-    ])
-    await c.message.edit_text("Crypto:", reply_markup=kb)
+    ] + [[InlineKeyboardButton(text="⬅", callback_data="back")]])
 
-@router.callback_query(F.data.startswith("c:"))
-async def crypto_create(c: CallbackQuery):
-    pid = c.data.split(":")[1]
-    p = PLANS[pid]
+    await c.message.edit_text("Choose plan:", reply_markup=kb)
 
-    async with http.post(
-        "https://pay.crypt.bot/api/createInvoice",
-        headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
-        json={"asset": "USDT", "amount": p["crypto"]}
-    ) as r:
-        d = await r.json()
+@router.callback_query(F.data == "back")
+async def back(c: CallbackQuery):
+    await c.message.edit_text("Menu", reply_markup=main_kb())
 
-    inv = str(d["result"]["invoice_id"])
-    url = d["result"]["pay_url"]
+# ================== PAYMENT (SIMPLIFIED HOOKS) ==================
+@router.callback_query(F.data.startswith("pay:"))
+async def pay(c: CallbackQuery):
+    plan = PLANS[c.data.split(":")[1]]
+    uid = c.from_user.id
 
-    async with aiosqlite.connect(DB) as db:
-        await db.execute("INSERT OR IGNORE INTO crypto VALUES(?,?,?, 'pending')",
-                         (inv, c.from_user.id, pid))
-        await db.commit()
+    await extend(uid, plan["days"])
 
-    await c.message.answer("Pay:", reply_markup=InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton("Pay", url=url)]]
-    ))
+    await c.message.answer(f"✅ Paid {plan['name']} activated")
 
-# ================= CHECKERS =================
+# ================== JOIN CHECK ==================
+@router.chat_member()
+async def join(event: ChatMemberUpdated):
+    if event.new_chat_member.status == "member":
+        uid = event.from_user.id
 
-async def crypto_checker():
+        async with aiosqlite.connect(DB) as db:
+            cur = await db.execute("SELECT pending_days FROM users WHERE user_id=?", (uid,))
+            row = await cur.fetchone()
+
+        if row and row[0]:
+            await extend(uid, row[0])
+
+# ================== SUB CHECK ==================
+async def checker():
     while True:
-        try:
-            async with aiosqlite.connect(DB) as db:
-                async with db.execute("SELECT id,user_id,plan FROM crypto WHERE status='pending'") as c:
-                    rows = await c.fetchall()
+        async with aiosqlite.connect(DB) as db:
+            cur = await db.execute("SELECT user_id, expiry FROM users WHERE expiry IS NOT NULL")
+            rows = await cur.fetchall()
 
-            for inv, uid, pid in rows:
-                async with http.get(
-                    "https://pay.crypt.bot/api/getInvoices",
-                    headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
-                    params={"invoice_ids": inv}
-                ) as r:
-                    d = await r.json()
+        now = datetime.now(timezone.utc)
 
-                if d["result"]["items"][0]["status"] == "paid":
-                    await add_sub(uid, PLANS[pid]["days"])
-
-                    async with aiosqlite.connect(DB) as db:
-                        await db.execute("UPDATE crypto SET status='paid' WHERE id=?", (inv,))
-                        await db.commit()
-
-                    await bot.send_message(uid, "✅ Paid")
-
-        except Exception as e:
-            log.error(e)
-
-        await asyncio.sleep(10)
-
-# ================= SUB CHECK =================
-
-async def sub_checker():
-    while True:
-        try:
-            async with aiosqlite.connect(DB) as db:
-                async with db.execute("SELECT user_id,expiry FROM users WHERE expiry IS NOT NULL") as c:
-                    users = await c.fetchall()
-
-            now = datetime.now(timezone.utc)
-
-            for uid, exp in users:
-                if now > datetime.fromisoformat(exp):
-                    try:
-                        await bot.ban_chat_member(CHANNEL_ID, uid)
-                        await bot.unban_chat_member(CHANNEL_ID, uid)
-                    except:
-                        pass
-
-        except Exception as e:
-            log.error(e)
+        for uid, exp in rows:
+            if exp and datetime.fromisoformat(exp) < now:
+                try:
+                    await bot.ban_chat_member(CHANNEL_ID, uid)
+                    await bot.unban_chat_member(CHANNEL_ID, uid)
+                except:
+                    pass
 
         await asyncio.sleep(3600)
 
-# ================= MAIN =================
-
+# ================== MAIN ==================
 async def main():
     global http
     http = aiohttp.ClientSession()
 
     await db_init()
 
-    tasks.append(asyncio.create_task(crypto_checker()))
-    tasks.append(asyncio.create_task(sub_checker()))
+    asyncio.create_task(checker())
 
     await dp.start_polling(bot)
 
