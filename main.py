@@ -549,46 +549,59 @@ async def get_or_create_invite(user_id: int, days: int):
 
         return link
 
-# ================== SETTINGS LOGIC ==================
+# --- SETTINGS & INFO HANDLERS ---
 
-# Этот хендлер срабатывает при нажатии на кнопку "Настройки"
 @router.callback_query(F.data == "settings")
 async def settings_menu(call: CallbackQuery):
     lang = await get_lang(call.from_user.id)
     
-    # Тексты для меню настроек
-    text = {
-        "ru": "<b>⚙️ Настройки</b>\n\nЗдесь вы можете изменить язык интерфейса или проверить статус подписки.",
-        "en": "<b>⚙️ Settings</b>\n\nHere you can change the interface language or check your subscription status.",
-        "es": "<b>⚙️ Ajustes</b>\n\nAquí puedes cambiar el idioma de la interfaz.",
-        "de": "<b>⚙️ Einstellungen</b>\n\nHier können Sie die Sprache ändern.",
-        "fr": "<b>⚙️ Paramètres</b>\n\nIci, vous pouvez changer la langue."
+    # Тексты кнопок в зависимости от языка
+    btns = {
+        "ru": {"lang": "🌍 Сменить язык", "info": "📄 О сервисе / Privacy"},
+        "en": {"lang": "🌍 Change Language", "info": "📄 About / Privacy"},
+        "es": {"lang": "🌍 Cambiar idioma", "info": "📄 Privacidad"},
+        "de": {"lang": "🌍 Sprache ändern", "info": "📄 Datenschutz"},
+        "fr": {"lang": "🌍 Changer de langue", "info": "📄 Confidentialité"}
     }
-
-    # Текст на кнопке для перехода к флагам
-    change_lang_btn_text = {
-        "ru": "🌍 Сменить язык",
-        "en": "🌍 Change Language",
-        "es": "🌍 Cambiar idioma",
-        "de": "🌍 Sprache ändern",
-        "fr": "🌍 Changer de langue"
-    }
+    b = btns.get(lang, btns["en"])
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=change_lang_btn_text.get(lang, "🌍"), callback_data="show_lang_menu")],
+        [InlineKeyboardButton(text=b["lang"], callback_data="show_lang_menu")],
+        [InlineKeyboardButton(text=b["info"], callback_data="show_policy")],
         [InlineKeyboardButton(text="⬅ Back", callback_data="back")]
     ])
 
+    title = {"ru": "⚙️ <b>Настройки</b>", "en": "⚙️ <b>Settings</b>"}
+    await call.message.edit_text(title.get(lang, title["en"]), reply_markup=kb, parse_mode="HTML")
+    await call.answer()
+
+@router.callback_query(F.data == "show_policy")
+async def show_policy(call: CallbackQuery):
+    lang = await get_lang(call.from_user.id)
+    
+    # ТВОИ ТЕКСТЫ ПОЛИТИКИ И ИНФОРМАЦИИ
+    policy_map = {
+        "ru": "📄 <b>О сервисе</b>\n\nДанный бот предоставляет доступ к закрытому контенту. Оплата является добровольным пожертвованием. Возврат средств не предусмотрен. Ваши данные (ID) используются только для работы подписки.",
+        "en": "📄 <b>About & Privacy</b>\n\nThis bot provides access to private content. Payments are voluntary. No refunds. Your ID is used only for subscription management.",
+        "es": "📄 <b>Privacidad</b>\n\nLos pagos son voluntarios. No hay reembolsos.",
+        "de": "📄 <b>Datenschutz</b>\n\nZahlungen sind freiwillig. Keine Rückerstattung.",
+        "fr": "📄 <b>Confidentialité</b>\n\nLes paiements sont volontaires. Pas de remboursement."
+    }
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅ Back", callback_data="settings")]
+    ])
+
     await call.message.edit_text(
-        text.get(lang, text["en"]),
-        reply_markup=kb,
+        policy_map.get(lang, policy_map["en"]), 
+        reply_markup=kb, 
         parse_mode="HTML"
     )
     await call.answer()
 
-# Этот хендлер просто открывает твое уже созданное меню с флагами (LANG_KB)
 @router.callback_query(F.data == "show_lang_menu")
 async def show_lang_menu_callback(call: CallbackQuery):
+    # Просто вызываем твою готовую клавиатуру с флагами
     await call.message.edit_text(
         "🌍 Choose your language / Выберите язык",
         reply_markup=LANG_KB
@@ -705,30 +718,66 @@ async def stars_confirm(call: CallbackQuery):
 
     await call.answer()
 
-
 # --- CARD MENU ---
 @router.callback_query(F.data == "pay_card")
 async def pay_card(call: CallbackQuery):
     lang = await get_lang(call.from_user.id)
 
+    # 1. Прописываем тексты прямо здесь, раз мы не создавали отдельный блок TEXTS
     text_map = {
-        "ru": "💳 Выберите тариф:",
-        "en": "💳 Choose a plan:",
-        "es": "💳 Elige un plan:",
-        "de": "💳 Tarif wählen:",
-        "fr": "💳 Choisissez une offre:"
+        "ru": (
+            "💳 <b>Выберите тариф:</b>\n\n"
+            "💎 1 день — 690 рублей\n"
+            "После оплаты вам придет ссылка на закрытый канал."
+        ),
+        "en": (
+            "💳 <b>Choose a plan:</b>\n\n"
+            "💎 1 day — 690 RUB\n"
+            "⚠️ <b>Note:</b> SBP and Russian Cards work only with Russian banks. "
+            "For international payments, please use <b>Stars</b> or <b>Crypto</b>."
+        ),
+        "es": (
+            "💳 <b>Elige un plan:</b>\n\n"
+            "💎 1 día — 690 RUB\n"
+            "⚠️ <b>Nota:</b> El pago con tarjeta rusa solo funciona para bancos de Rusia. "
+            "Use <b>Stars</b> o <b>Crypto</b> para pagos internacionales."
+        ),
+        "de": (
+            "💳 <b>Tarif wählen:</b>\n\n"
+            "💎 1 Tag — 690 RUB\n"
+            "⚠️ <b>Hinweis:</b> Zahlungen mit russischen Karten funktionieren nur mit russischen Banken. "
+            "Nutzen Sie <b>Stars</b> oder <b>Crypto</b>."
+        ),
+        "fr": (
+            "💳 <b>Choisissez une offre:</b>\n\n"
+            "💎 1 jour — 690 RUB\n"
+            "⚠️ <b>Note:</b> Le paiement par carte russe ne fonctionne que pour les banques russes. "
+            "Utilisez <b>Stars</b> ou <b>Crypto</b>."
+        )
     }
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
+    # 2. Формируем кнопки из твоего словаря PLANS
+    kb_list = [
         [InlineKeyboardButton(
             text=f"{p['name']} — {p['rub']}₽",
             callback_data=f"card_confirm:{k}"
         )]
         for k, p in PLANS.items()
-    ] + [[InlineKeyboardButton(text="⬅ Back", callback_data="back")]])
+    ]
+    
+    # 3. Добавляем кнопку "Назад"
+    kb_list.append([InlineKeyboardButton(text="⬅ Back", callback_data="back")])
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=kb_list)
 
-    await call.message.edit_text(text_map.get(lang, text_map["en"]), reply_markup=kb)
+    # 4. Отправляем сообщение с поддержкой HTML
+    await call.message.edit_text(
+        text_map.get(lang, text_map["en"]), 
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
     await call.answer()
+
     
 # --- START ---
 @router.message(CommandStart())
