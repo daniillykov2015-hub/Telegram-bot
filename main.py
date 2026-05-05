@@ -442,6 +442,7 @@ KB_TEXTS = {
 
 
 # --- главное меню ---
+# --- главное меню ---
 async def main_menu_kb(user_id: int):
     lang = await get_lang(user_id)
     t = KB_TEXTS.get(lang, KB_TEXTS["en"])
@@ -460,7 +461,6 @@ async def main_menu_kb(user_id: int):
         ],
         [
             InlineKeyboardButton(text=t["info"], callback_data="info"),
-            InlineKeyboardButton(text="🌍 Language", callback_data="lang_menu")
         ]
     ])
 
@@ -640,22 +640,25 @@ async def pay_card(call: CallbackQuery):
 
 
 # --- START ---
+# --- START ---
 @router.message(CommandStart())
 async def start(message: Message):
     user_id = message.from_user.id
     args = message.text.split()
 
-    # 🌍 язык Telegram (fallback если нет — en)
     tg_lang = (message.from_user.language_code or "en")[:2]
     if tg_lang not in ["ru", "en", "es", "de", "fr"]:
         tg_lang = "en"
 
     async with aiosqlite.connect(DB_NAME) as db:
 
-        # 👤 создаём пользователя
+        # 👤 создаём пользователя + сразу ставим язык по Telegram
         await db.execute(
-            "INSERT OR IGNORE INTO users (user_id, language) VALUES (?, NULL)",
-            (user_id,)
+            """
+            INSERT OR IGNORE INTO users (user_id, language)
+            VALUES (?, ?)
+            """,
+            (user_id, tg_lang)
         )
 
         # 👥 рефералка
@@ -674,18 +677,17 @@ async def start(message: Message):
 
         await db.commit()
 
+    lang = await get_lang(user_id)
+
+    # 🌍 ПЕРВЫЙ ВХОД — показываем язык ТОЛЬКО если он пустой (на всякий случай)
     user = await get_user(user_id)
 
-    # ❗ если язык не выбран → показываем выбор
     if not user or not user[7]:
         await message.answer(
-            "🌍 Choose language / Выберите язык",
+            "🌍 Choose your language / Выберите язык",
             reply_markup=LANG_KB
         )
         return
-
-    # 🌍 язык пользователя
-    lang = await get_lang(user_id)
 
     await message.answer(
         TEXTS[lang]["main"],
