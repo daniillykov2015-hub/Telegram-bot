@@ -465,7 +465,7 @@ async def main_menu_kb(user_id: int):
     ])
 
 
-# --- меню выбора языка ---
+# --- меню выбора языка (с флагами) ---
 LANG_KB = InlineKeyboardMarkup(inline_keyboard=[
     [
         InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang:ru"),
@@ -546,6 +546,7 @@ async def set_lang(call: CallbackQuery):
         )
         await db.commit()
 
+    # сразу показываем главное меню
     await call.message.edit_text(
         TEXTS[lang]["main"],
         reply_markup=await main_menu_kb(call.from_user.id)
@@ -644,11 +645,16 @@ async def start(message: Message):
     user_id = message.from_user.id
     args = message.text.split()
 
+    # 🌍 язык Telegram (fallback если нет — en)
+    tg_lang = (message.from_user.language_code or "en")[:2]
+    if tg_lang not in ["ru", "en", "es", "de", "fr"]:
+        tg_lang = "en"
+
     async with aiosqlite.connect(DB_NAME) as db:
 
-        # 👤 создаём пользователя (без языка по умолчанию!)
+        # 👤 создаём пользователя
         await db.execute(
-            "INSERT OR IGNORE INTO users (user_id) VALUES (?)",
+            "INSERT OR IGNORE INTO users (user_id, language) VALUES (?, NULL)",
             (user_id,)
         )
 
@@ -668,32 +674,19 @@ async def start(message: Message):
 
         await db.commit()
 
-    # 🌍 проверяем язык
-    lang = await get_lang(user_id)
-
     user = await get_user(user_id)
 
-    # ❗ если язык ещё не выбран → показываем выбор
+    # ❗ если язык не выбран → показываем выбор
     if not user or not user[7]:
         await message.answer(
             "🌍 Choose language / Выберите язык",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang:ru"),
-                    InlineKeyboardButton(text="🇬🇧 English", callback_data="lang:en"),
-                ],
-                [
-                    InlineKeyboardButton(text="🇪🇸 Español", callback_data="lang:es"),
-                    InlineKeyboardButton(text="🇩🇪 Deutsch", callback_data="lang:de"),
-                ],
-                [
-                    InlineKeyboardButton(text="🇫🇷 Français", callback_data="lang:fr"),
-                ]
-            ])
+            reply_markup=LANG_KB
         )
         return
 
-    # ✅ если язык уже есть → обычный старт
+    # 🌍 язык пользователя
+    lang = await get_lang(user_id)
+
     await message.answer(
         TEXTS[lang]["main"],
         reply_markup=await main_menu_kb(user_id)
