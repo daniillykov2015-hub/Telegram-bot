@@ -687,45 +687,46 @@ async def start(message: Message):
     user_id = message.from_user.id
     args = message.text.split()
 
-    tg_lang = (message.from_user.language_code or "en")[:2]
-    if tg_lang not in ["ru", "en", "es", "de", "fr"]:
-        tg_lang = "en"
-
-    async with aiosqlite.connect(DB_NAME) as db:
-
-        # 👤 создаём / обновляем пользователя + язык
-        await db.execute("""
-        INSERT INTO users (user_id, language)
-        VALUES (?, ?)
-        ON CONFLICT(user_id)
-        DO UPDATE SET language=excluded.language
-        """, (user_id, tg_lang))
-
-        # 👥 рефералка
-        if len(args) > 1 and args[1].isdigit():
-            referrer = int(args[1])
-
-            if referrer != user_id:
-                await db.execute("""
-                UPDATE users 
-                SET referrer=?
-                WHERE user_id=? AND referrer IS NULL
-                """, (referrer, user_id))
-
-        await db.commit()
-
-    # получаем пользователя
+    # 1. Получаем данные пользователя из БД
     user = await get_user(user_id)
-    lang = user[7] if user and user[7] else tg_lang
 
-    # 🌍 если язык вдруг пустой (первый запуск)
-    if not user or not user[7]:
+    # 2. Проверяем реферальную ссылку
+    referrer = None
+    if len(args) > 1 and args[1].isdigit():
+        referrer = int(args[1])
+        if referrer == user_id:
+            referrer = None
+
+    # 3. Если пользователя нет в базе (первый запуск)
+    if not user:
+        async with aiosqlite.connect(DB_NAME) as db:
+            # Записываем пользователя в БД, но language ставим NULL, 
+            # чтобы понять, что он еще не сделал выбор через кнопку.
+            await db.execute("""
+            INSERT INTO users (user_id, language, referrer)
+            VALUES (?, NULL, ?)
+            """, (user_id, referrer))
+            await db.commit()
+        
+        # Отправляем меню выбора языка
         await message.answer(
             "🌍 Choose your language / Выберите язык",
             reply_markup=LANG_KB
         )
         return
 
+    # 4. Если пользователь есть, смотрим его язык (индекс 7 в get_user)
+    lang = user[7]
+    
+    # Если язык в БД сброшен (например, нажал /start, но не кликнул на кнопку языка в прошлый раз)
+    if not lang:
+        await message.answer(
+            "🌍 Choose your language / Выберите язык",
+            reply_markup=LANG_KB
+        )
+        return
+
+    # 5. Пользователь уже есть и язык выбран — показываем сразу главное меню
     await message.answer(
         TEXTS[lang]["main"],
         reply_markup=await main_menu_kb(user_id)
