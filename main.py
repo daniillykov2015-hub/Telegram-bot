@@ -633,23 +633,40 @@ async def set_lang(call: CallbackQuery):
 async def stars_menu(call: CallbackQuery):
     lang = await get_lang(call.from_user.id)
 
-    # Тексты для меню Stars
+    # 1. Тексты описания
     text_map = {
-        "ru": "⭐ <b>Оплата Telegram Stars</b>\n\nВыберите тариф ниже. Доступ будет предоставлен мгновенно после оплаты.",
-        "en": "⭐ <b>Telegram Stars Payment</b>\n\nChoose a plan below. Access will be granted instantly after payment.",
+        "ru": "⭐ <b>Оплата Telegram Stars</b>\n\nВыберите тариф ниже. Доступ будет предоставлен мгновенно.",
+        "en": "⭐ <b>Telegram Stars Payment</b>\n\nChoose a plan below. Access will be granted instantly.",
         "es": "⭐ <b>Pago con Telegram Stars</b>\n\nElija un plan a continuación.",
         "de": "⭐ <b>Zahlung mit Telegram Stars</b>\n\nWählen Sie einen Tarif aus.",
         "fr": "⭐ <b>Paiement Telegram Stars</b>\n\nChoisissez une offre ci-dessous."
     }
 
-    # Формируем кнопки тарифов для Stars (используем те же PLANS, но для звезд)
-    kb_list = [
-        [InlineKeyboardButton(
-            text=f"{p['name']} — {p['stars']} ⭐",
+    # 2. Словарь для перевода единиц времени на кнопках
+    time_units = {
+        "ru": {"1": "день", "7": "дней", "30": "дней"},
+        "en": {"1": "day", "7": "days", "30": "days"},
+        "es": {"1": "día", "7": "días", "30": "días"},
+        "de": {"1": "Tag", "7": "Tage", "30": "Tage"},
+        "fr": {"1": "jour", "7": "jours", "30": "jours"}
+    }
+    
+    # Берем перевод для текущего языка (по умолчанию английский)
+    units = time_units.get(lang, time_units["en"])
+
+    # 3. Формируем кнопки
+    kb_list = []
+    for k, p in PLANS.items():
+        # Извлекаем только число из названия (например, "1" из "1 день")
+        days_count = "".join(filter(str.isdigit, p['name'])) 
+        
+        # Собираем новое название: Число + Переведенное слово
+        translated_name = f"{days_count} {units.get(days_count, 'd.')}"
+        
+        kb_list.append([InlineKeyboardButton(
+            text=f"{translated_name} — {p['stars']} ⭐",
             callback_data=f"stars_confirm:{k}"
-        )]
-        for k, p in PLANS.items()
-    ]
+        )])
     
     kb_list.append([InlineKeyboardButton(text="⬅ Back", callback_data="back")])
     
@@ -1029,7 +1046,8 @@ async def card_confirm(call: CallbackQuery):
         await call.message.answer("❌ Payment error")
 
     await call.answer()
-# --- CRYPTO ---
+
+# --- CRYPTO CONFIRM ---
 @router.callback_query(F.data.startswith("crypto_confirm:"))
 async def crypto_confirm(call: CallbackQuery):
     lang = await get_lang(call.from_user.id)
@@ -1041,8 +1059,20 @@ async def crypto_confirm(call: CallbackQuery):
         await call.message.answer("❌ Error")
         return
 
+    # Логика перевода названия тарифа (например, "1 день" -> "1 day")
+    time_units = {
+        "ru": {"1": "день", "7": "дней", "30": "дней"},
+        "en": {"1": "day", "7": "days", "30": "days"},
+        "es": {"1": "día", "7": "días", "30": "días"},
+        "de": {"1": "Tag", "7": "Tage", "30": "Tage"},
+        "fr": {"1": "jour", "7": "jours", "30": "jours"}
+    }
+    units = time_units.get(lang, time_units["en"])
+    days_count = "".join(filter(str.isdigit, plan['name']))
+    translated_plan_name = f"{days_count} {units.get(days_count, 'd.')}"
+
     try:
-        # --- тексты ---
+        # --- тексты загрузки ---
         ui_text = {
             "ru": "💰 Создание инвойса...",
             "en": "💰 Creating invoice...",
@@ -1058,7 +1088,7 @@ async def crypto_confirm(call: CallbackQuery):
             json={
                 "asset": "USDT",
                 "amount": float(plan["crypto"]),
-                "description": f"Subscription {plan['name']}"
+                "description": f"Subscription {translated_plan_name}"
             }
         ) as response:
 
@@ -1076,7 +1106,6 @@ async def crypto_confirm(call: CallbackQuery):
                 await call.message.answer("❌ Invalid response from CryptoBot")
                 return
 
-        # ❗ проверка структуры
         if not isinstance(data, dict) or not data.get("ok"):
             logger.error(f"Crypto API bad response: {data}")
             await call.message.answer("❌ Payment error")
@@ -1090,7 +1119,7 @@ async def crypto_confirm(call: CallbackQuery):
             await call.message.answer("❌ Invalid invoice data")
             return
 
-        # 💡 сохраняем инвойс
+        # 💡 сохраняем инвойс в БД
         async with aiosqlite.connect(DB_NAME) as db:
             await db.execute(
                 "INSERT OR IGNORE INTO crypto_invoices (invoice_id, user_id, plan_id, status) VALUES (?, ?, ?, 'pending')",
@@ -1098,34 +1127,33 @@ async def crypto_confirm(call: CallbackQuery):
             )
             await db.commit()
 
-        # 🔥 UX (loading)
         await call.answer("⏳")
         await call.message.edit_text(ui_text.get(lang, ui_text["en"]))
 
-        # --- финальный текст ---
+        # --- финальный текст с переведенным планом ---
         final_text = {
             "ru": (
-                f"💰 <b>{plan['name']}</b>\n"
+                f"💰 <b>{translated_plan_name}</b>\n"
                 f"💵 {plan['crypto']} USDT\n\n"
                 "👇 Нажмите для оплаты"
             ),
             "en": (
-                f"💰 <b>{plan['name']}</b>\n"
+                f"💰 <b>{translated_plan_name}</b>\n"
                 f"💵 {plan['crypto']} USDT\n\n"
                 "👇 Click to pay"
             ),
             "es": (
-                f"💰 <b>{plan['name']}</b>\n"
+                f"💰 <b>{translated_plan_name}</b>\n"
                 f"💵 {plan['crypto']} USDT\n\n"
                 "👇 Paga aquí"
             ),
             "de": (
-                f"💰 <b>{plan['name']}</b>\n"
+                f"💰 <b>{translated_plan_name}</b>\n"
                 f"💵 {plan['crypto']} USDT\n\n"
                 "👇 Bezahlen"
             ),
             "fr": (
-                f"💰 <b>{plan['name']}</b>\n"
+                f"💰 <b>{translated_plan_name}</b>\n"
                 f"💵 {plan['crypto']} USDT\n\n"
                 "👇 Payer"
             ),
@@ -1147,7 +1175,6 @@ async def crypto_confirm(call: CallbackQuery):
         await call.message.answer("❌ Payment error")
 
     await call.answer()
-
 # --- REFERRAL ---
 @router.callback_query(F.data == "ref")
 async def ref(call: CallbackQuery):
