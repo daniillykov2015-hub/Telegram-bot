@@ -417,7 +417,7 @@ KB_TEXTS = {
         "crypto": "💰 Crypto",
         "ref": "👥 Рефералы",
         "support": "💬 Поддержка",
-        "info": "ℹ️ Информация"
+        "settings": "⚙️ Настройки"
     },
     "en": {
         "card": "💳 Card / SBP",
@@ -425,7 +425,7 @@ KB_TEXTS = {
         "crypto": "💰 Crypto",
         "ref": "👥 Referral",
         "support": "💬 Support",
-        "info": "ℹ️ Info"
+        "settings": "⚙️ Settings"
     },
     "es": {
         "card": "💳 Tarjeta",
@@ -433,7 +433,7 @@ KB_TEXTS = {
         "crypto": "💰 Crypto",
         "ref": "👥 Referidos",
         "support": "💬 Soporte",
-        "info": "ℹ️ Info"
+        "settings": "⚙️ Ajustes"
     },
     "de": {
         "card": "💳 Karte",
@@ -441,7 +441,7 @@ KB_TEXTS = {
         "crypto": "💰 Crypto",
         "ref": "👥 Empfehlungen",
         "support": "💬 Support",
-        "info": "ℹ️ Info"
+        "settings": "⚙️ Einstellungen"
     },
     "fr": {
         "card": "💳 Carte",
@@ -449,9 +449,10 @@ KB_TEXTS = {
         "crypto": "💰 Crypto",
         "ref": "👥 Parrainage",
         "support": "💬 Support",
-        "info": "ℹ️ Info"
+        "settings": "⚙️ Paramètres"
     }
 }
+
 
 
 # --- главное меню ---
@@ -472,7 +473,8 @@ async def main_menu_kb(user_id: int):
             InlineKeyboardButton(text=t["support"], url="https://t.me/mistybibi"),
         ],
         [
-            InlineKeyboardButton(text=t["info"], callback_data="info"),
+            # Заменили info на settings
+            InlineKeyboardButton(text=t["settings"], callback_data="settings"),
         ]
     ])
 
@@ -496,10 +498,10 @@ LANG_KB = InlineKeyboardMarkup(inline_keyboard=[
 # --- получаем язык ---
 async def get_lang(user_id: int):
     user = await get_user(user_id)
+    # В таблице users столбец language идет 8-м по счету (индекс 7)
     if user and user[7]:
         return user[7]
     return "en"
-
 
 
 # ================== INVITE (оставляем, но опционально) ==================
@@ -546,6 +548,53 @@ async def get_or_create_invite(user_id: int, days: int):
         await db.commit()
 
         return link
+
+# ================== SETTINGS LOGIC ==================
+
+# Этот хендлер срабатывает при нажатии на кнопку "Настройки"
+@router.callback_query(F.data == "settings")
+async def settings_menu(call: CallbackQuery):
+    lang = await get_lang(call.from_user.id)
+    
+    # Тексты для меню настроек
+    text = {
+        "ru": "<b>⚙️ Настройки</b>\n\nЗдесь вы можете изменить язык интерфейса или проверить статус подписки.",
+        "en": "<b>⚙️ Settings</b>\n\nHere you can change the interface language or check your subscription status.",
+        "es": "<b>⚙️ Ajustes</b>\n\nAquí puedes cambiar el idioma de la interfaz.",
+        "de": "<b>⚙️ Einstellungen</b>\n\nHier können Sie die Sprache ändern.",
+        "fr": "<b>⚙️ Paramètres</b>\n\nIci, vous pouvez changer la langue."
+    }
+
+    # Текст на кнопке для перехода к флагам
+    change_lang_btn_text = {
+        "ru": "🌍 Сменить язык",
+        "en": "🌍 Change Language",
+        "es": "🌍 Cambiar idioma",
+        "de": "🌍 Sprache ändern",
+        "fr": "🌍 Changer de langue"
+    }
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=change_lang_btn_text.get(lang, "🌍"), callback_data="show_lang_menu")],
+        [InlineKeyboardButton(text="⬅ Back", callback_data="back")]
+    ])
+
+    await call.message.edit_text(
+        text.get(lang, text["en"]),
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+# Этот хендлер просто открывает твое уже созданное меню с флагами (LANG_KB)
+@router.callback_query(F.data == "show_lang_menu")
+async def show_lang_menu_callback(call: CallbackQuery):
+    await call.message.edit_text(
+        "🌍 Choose your language / Выберите язык",
+        reply_markup=LANG_KB
+    )
+    await call.answer()
+
 # ================== HANDLERS ==================
 @router.callback_query(F.data.startswith("lang:"))
 async def set_lang(call: CallbackQuery):
