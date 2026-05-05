@@ -470,7 +470,19 @@ async def main_menu_kb(user_id: int):
         ]
     ])
 
-
+LANG_KB = InlineKeyboardMarkup(inline_keyboard=[
+    [
+        InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang:ru"),
+        InlineKeyboardButton(text="🇬🇧 English", callback_data="lang:en"),
+    ],
+    [
+        InlineKeyboardButton(text="🇪🇸 Español", callback_data="lang:es"),
+        InlineKeyboardButton(text="🇩🇪 Deutsch", callback_data="lang:de"),
+    ],
+    [
+        InlineKeyboardButton(text="🇫🇷 Français", callback_data="lang:fr"),
+    ]
+])
 # ================== INVITE (оставляем, но опционально) ==================
 
 async def get_or_create_invite(user_id: int, days: int):
