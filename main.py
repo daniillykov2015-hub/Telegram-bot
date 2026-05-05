@@ -440,14 +440,6 @@ KB_TEXTS = {
 }
 
 
-# --- получаем язык ---
-async def get_lang(user_id: int):
-    user = await get_user(user_id)
-    if user and user[7]:
-        return user[7]
-    return "en"
-
-
 # --- главное меню ---
 async def main_menu_kb(user_id: int):
     lang = await get_lang(user_id)
@@ -466,10 +458,13 @@ async def main_menu_kb(user_id: int):
             InlineKeyboardButton(text=t["support"], url="https://t.me/mistybibi"),
         ],
         [
-            InlineKeyboardButton(text=t["info"], callback_data="info")
+            InlineKeyboardButton(text=t["info"], callback_data="info"),
+            InlineKeyboardButton(text="🌍 Language", callback_data="lang_menu")
         ]
     ])
 
+
+# --- меню выбора языка ---
 LANG_KB = InlineKeyboardMarkup(inline_keyboard=[
     [
         InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang:ru"),
@@ -483,6 +478,17 @@ LANG_KB = InlineKeyboardMarkup(inline_keyboard=[
         InlineKeyboardButton(text="🇫🇷 Français", callback_data="lang:fr"),
     ]
 ])
+
+
+# --- получаем язык ---
+async def get_lang(user_id: int):
+    user = await get_user(user_id)
+    if user and user[7]:
+        return user[7]
+    return "en"
+
+
+
 # ================== INVITE (оставляем, но опционально) ==================
 
 async def get_or_create_invite(user_id: int, days: int):
