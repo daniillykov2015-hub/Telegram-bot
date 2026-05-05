@@ -240,6 +240,19 @@ PLANS = {
     },
 }
 # ================== DB LOGIC ==================
+async def upsert_user(user_id: int, language: str, referrer: int | None = None):
+    async with aiosqlite.connect(DB_NAME) as db:
+
+        await db.execute("""
+        INSERT INTO users (user_id, language, referrer)
+        VALUES (?, ?, ?)
+        ON CONFLICT(user_id)
+        DO UPDATE SET
+            language = excluded.language,
+            referrer = COALESCE(users.referrer, excluded.referrer)
+        """, (user_id, language, referrer))
+
+        await db.commit()
 
 async def init_db():
     async with aiosqlite.connect(DB_NAME) as db:
@@ -667,9 +680,7 @@ async def pay_card(call: CallbackQuery):
 
     await call.message.edit_text(text_map.get(lang, text_map["en"]), reply_markup=kb)
     await call.answer()
-
-
-# --- START ---
+    
 # --- START ---
 @router.message(CommandStart())
 async def start(message: Message):
@@ -682,36 +693,32 @@ async def start(message: Message):
 
     async with aiosqlite.connect(DB_NAME) as db:
 
-        # 👤 создаём пользователя + сразу ставим язык по Telegram
-        await db.execute(
-            """
-            INSERT OR IGNORE INTO users (user_id, language)
-            VALUES (?, ?)
-            """,
-            (user_id, tg_lang)
-        )
+        # 👤 создаём / обновляем пользователя + язык
+        await db.execute("""
+        INSERT INTO users (user_id, language)
+        VALUES (?, ?)
+        ON CONFLICT(user_id)
+        DO UPDATE SET language=excluded.language
+        """, (user_id, tg_lang))
 
         # 👥 рефералка
         if len(args) > 1 and args[1].isdigit():
             referrer = int(args[1])
 
             if referrer != user_id:
-                await db.execute(
-                    """
-                    UPDATE users 
-                    SET referrer=? 
-                    WHERE user_id=? AND referrer IS NULL
-                    """,
-                    (referrer, user_id)
-                )
+                await db.execute("""
+                UPDATE users 
+                SET referrer=?
+                WHERE user_id=? AND referrer IS NULL
+                """, (referrer, user_id))
 
         await db.commit()
 
-    lang = await get_lang(user_id)
-
-    # 🌍 ПЕРВЫЙ ВХОД — показываем язык ТОЛЬКО если он пустой (на всякий случай)
+    # получаем пользователя
     user = await get_user(user_id)
+    lang = user[7] if user and user[7] else tg_lang
 
+    # 🌍 если язык вдруг пустой (первый запуск)
     if not user or not user[7]:
         await message.answer(
             "🌍 Choose your language / Выберите язык",
