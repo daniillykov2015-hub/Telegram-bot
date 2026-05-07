@@ -1217,11 +1217,11 @@ async def card_confirm(call: CallbackQuery):
 
     await call.answer()
 
-# ================== STEP 2: CREATE CRYPTO INVOICE ==================
+# ================== STEP 2: CREATE CRYPTO INVOICE (NO DUPLICATES) ==================
 
 @router.callback_query(F.data.startswith("c_pay:"))
 async def crypto_confirm(call: CallbackQuery):
-    """Создает счет в CryptoPay после выбора тарифа"""
+    """Создает счет и заменяет меню текстом оплаты в том же сообщении"""
     await call.answer()
     
     plan_id = call.data.split(":")[1]
@@ -1232,13 +1232,13 @@ async def crypto_confirm(call: CallbackQuery):
     user_id = call.from_user.id
     lang = await get_lang(user_id)
 
-    # 1. Тексты уведомлений
-    messages = {
-        "ru": "⏳ Создаю счет для оплаты <b>{name}</b>...",
-        "en": "⏳ Creating invoice for <b>{name}</b>...",
-        "es": "⏳ Creando factura para <b>{name}</b>...",
-        "de": "⏳ Rechnung für <b>{name}</b> wird erstellt...",
-        "fr": "⏳ Création de la facture pour <b>{name}</b>..."
+    # Тексты статуса
+    wait_messages = {
+        "ru": "⏳ Создаю счет...",
+        "en": "⏳ Creating invoice...",
+        "es": "⏳ Creando factura...",
+        "de": "⏳ Rechnung wird erstellt...",
+        "fr": "⏳ Création de la facture..."
     }
     
     pay_btn_texts = {
@@ -1249,8 +1249,8 @@ async def crypto_confirm(call: CallbackQuery):
         "fr": "💳 Payer {amount} USDT"
     }
 
-    # Временное сообщение, чтобы юзер видел активность
-    status_msg = await call.message.answer(messages.get(lang, messages["en"]).format(name=plan["name"]))
+    # 1. Сначала меняем текст на "Создаю счет", чтобы юзер видел отклик в том же окне
+    await call.message.edit_text(wait_messages.get(lang, wait_messages["en"]))
 
     # 2. Запрос к CryptoPay API
     url = "https://pay.crypt.bot/api/createInvoice"
@@ -1260,7 +1260,7 @@ async def crypto_confirm(call: CallbackQuery):
         "amount": str(plan["crypto"]),
         "description": f"Subscription for {plan['days']} days",
         "paid_btn_name": "viewItem",
-        "paid_btn_url": "https://t.me/mistybibi" # Ссылка на поддержку или канал
+        "paid_btn_url": "https://t.me/mistybibi" 
     }
 
     try:
@@ -1272,7 +1272,7 @@ async def crypto_confirm(call: CallbackQuery):
             invoice_id = invoice["invoice_id"]
             pay_url = invoice["bot_invoice_url"]
 
-            # 3. Записываем инвойс в базу (таблица из Части 3)
+            # 3. Записываем в базу
             async with aiosqlite.connect(DB_NAME) as db:
                 await db.execute(
                     "INSERT INTO crypto_invoices (invoice_id, user_id, plan_id, status) VALUES (?, ?, ?, ?)",
@@ -1280,26 +1280,31 @@ async def crypto_confirm(call: CallbackQuery):
                 )
                 await db.commit()
 
-            # 4. Отправляем кнопку оплаты
+            # 4. Обновляем ЭТО ЖЕ сообщение финальным текстом и кнопкой
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text=pay_btn_texts.get(lang, pay_btn_texts["en"]).format(amount=plan["crypto"]), url=pay_url)],
                 [InlineKeyboardButton(text="⬅️ Back", callback_data="crypto_menu")]
             ])
 
             final_text = {
-                "ru": "✅ Счет создан! Нажмите кнопку ниже для оплаты в Crypto Bot.\n\n<i>После оплаты бот автоматически выдаст вам доступ.</i>",
-                "en": "✅ Invoice created! Click the button below to pay via Crypto Bot.\n\n<i>After payment, the bot will automatically grant you access.</i>",
-                # ... можно добавить остальные языки аналогично
+                "ru": "✅ <b>Счет создан!</b>\n\nНажмите кнопку ниже для оплаты в Crypto Bot.\n\n<i>После оплаты доступ будет выдан автоматически.</i>",
+                "en": "✅ <b>Invoice created!</b>\n\nClick the button below to pay via Crypto Bot.\n\n<i>Access will be granted automatically after payment.</i>",
+                "es": "✅ <b>¡Factura creada!</b>\n\nPresiona el botón de abajo para pagar.\n\n<i>El acceso se dará automáticamente tras el pago.</i>",
+                "de": "✅ <b>Rechnung erstellt!</b>\n\nKlicke auf den Button unten, um zu bezahlen.\n\n<i>Der Zugang wird automatisch nach Zahlung gewährt.</i>",
+                "fr": "✅ <b>Facture créée !</b>\n\nCliquez sur le bouton ci-dessous pour payer.\n\n<i>L'accès sera accordé automatiquement après le paiement.</i>"
             }
 
-            await status_msg.edit_text(final_text.get(lang, final_text["en"]), reply_markup=kb, parse_mode="HTML")
+            await call.message.edit_text(
+                text=final_text.get(lang, final_text["en"]), 
+                reply_markup=kb, 
+                parse_mode="HTML"
+            )
         else:
-            logger.error(f"CryptoPay Error: {data}")
-            await status_msg.edit_text("Error creating invoice. Please try again later.")
+            await call.message.edit_text("❌ Error creating invoice.")
 
     except Exception as e:
-        logger.error(f"CryptoPay Connection Error: {e}")
-        await status_msg.edit_text("Connection error. Please contact support.")
+        logger.error(f"CryptoPay Error: {e}")
+        await call.message.edit_text("⚠️ Connection error. Try again.")
 # --- REFERRAL ---
 @router.callback_query(F.data == "ref")
 async def ref(call: CallbackQuery):
