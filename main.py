@@ -608,57 +608,75 @@ async def show_lang_menu_callback(call: CallbackQuery):
     await call.answer()
 
 
-# --- CRYPTO MENU ---
+# --- CRYPTO MENU (FIXED STABLE VERSION) ---
 @router.callback_query(F.data == "crypto")
 async def crypto_menu(call: CallbackQuery):
-    lang = await get_lang(call.from_user.id)
+    try:
+        lang = await get_lang(call.from_user.id)
 
-    text_map = {
-        "ru": (
-            "💰 <b>Оплата Crypto</b>\n\n"
-            "После оплаты вы получите доступ к каналу автоматически.\n"
-            "👇 Выберите тариф"
-        ),
-        "en": (
-            "💰 <b>Crypto Payment</b>\n\n"
-            "After payment you will get access automatically.\n"
-            "👇 Choose a plan"
-        ),
-        "es": (
-            "💰 <b>Pago Crypto</b>\n\n"
-            "Después del pago obtendrás acceso automáticamente.\n"
-            "👇 Elige un plan"
-        ),
-        "de": (
-            "💰 <b>Krypto Zahlung</b>\n\n"
-            "Nach der Zahlung erhältst du automatisch Zugang.\n"
-            "👇 Wähle einen Tarif"
-        ),
-        "fr": (
-            "💰 <b>Paiement Crypto</b>\n\n"
-            "Après paiement, l’accès sera activé automatiquement.\n"
-            "👇 Choisissez un plan"
-        ),
-    }
+        text_map = {
+            "ru": (
+                "💰 <b>Оплата Crypto</b>\n\n"
+                "После оплаты вы получите доступ к каналу автоматически.\n\n"
+                "👇 Выберите тариф"
+            ),
+            "en": (
+                "💰 <b>Crypto Payment</b>\n\n"
+                "After payment you will get access automatically.\n\n"
+                "👇 Choose a plan"
+            ),
+            "es": (
+                "💰 <b>Pago Crypto</b>\n\n"
+                "After payment access is granted automatically.\n\n"
+                "👇 Elige un plan"
+            ),
+            "de": (
+                "💰 <b>Krypto Zahlung</b>\n\n"
+                "Nach der Zahlung erfolgt der Zugang automatisch.\n\n"
+                "👇 Wähle einen Tarif"
+            ),
+            "fr": (
+                "💰 <b>Paiement Crypto</b>\n\n"
+                "L’accès est activé automatiquement après paiement.\n\n"
+                "👇 Choisissez un plan"
+            ),
+        }
 
-    # кнопки тарифов
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text=f"{p['name']} — {p['crypto']} USDT",
-                                 callback_data=f"crypto_confirm:{k}")
+        # кнопки тарифов
+        kb_list = [
+            [
+                InlineKeyboardButton(
+                    text=f"{p['name']} — {p['crypto']} USDT",
+                    callback_data=f"crypto_confirm:{k}"
+                )
+            ]
+            for k, p in PLANS.items()
         ]
-        for k, p in PLANS.items()
-    ])
 
-    kb.inline_keyboard.append([
-        InlineKeyboardButton(text="⬅ Back", callback_data="back")
-    ])
+        # 🔥 отдельный back (чтобы не конфликтовал)
+        kb_list.append([
+            InlineKeyboardButton(text="⬅ Back", callback_data="main_back")
+        ])
 
-    await call.message.edit_text(
-        text_map.get(lang, text_map["en"]),
-        reply_markup=kb,
-        parse_mode="HTML"
-    )
+        kb = InlineKeyboardMarkup(inline_keyboard=kb_list)
+
+        try:
+            await call.message.edit_text(
+                text_map.get(lang, text_map["en"]),
+                reply_markup=kb,
+                parse_mode="HTML"
+            )
+        except Exception:
+            # если сообщение нельзя редактировать — просто отправим новое
+            await call.message.answer(
+                text_map.get(lang, text_map["en"]),
+                reply_markup=kb,
+                parse_mode="HTML"
+            )
+
+    except Exception as e:
+        logger.error(f"crypto_menu error: {e}")
+        await call.answer("Error", show_alert=True)
 
     await call.answer()
 
@@ -702,6 +720,18 @@ async def set_lang(call: CallbackQuery):
         await db.commit()
 
     # сразу показываем главное меню
+    await call.message.edit_text(
+        TEXTS[lang]["main"],
+        reply_markup=await main_menu_kb(call.from_user.id)
+    )
+
+    await call.answer()
+
+# --- MAIN BACK ---
+@router.callback_query(F.data == "main_back")
+async def main_back(call: CallbackQuery):
+    lang = await get_lang(call.from_user.id)
+
     await call.message.edit_text(
         TEXTS[lang]["main"],
         reply_markup=await main_menu_kb(call.from_user.id)
