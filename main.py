@@ -548,6 +548,57 @@ async def get_or_create_invite(user_id: int, days: int):
 
         return link
 
+# ================== FIX: CRYPTO MENU LOGIC ==================
+
+async def crypto_menu_kb(user_id: int):
+    """Генерирует клавиатуру выбора тарифа для CryptoPay"""
+    lang = await get_lang(user_id)
+    
+    # Текст для кнопки назад в зависимости от языка
+    back_texts = {"ru": "⬅️ Назад", "en": "⬅️ Back", "es": "⬅️ Atrás", "de": "⬅️ Zurück", "fr": "⬅️ Retour"}
+    back_btn = back_texts.get(lang, "⬅️ Back")
+
+    buttons = []
+    for pid, plan in PLANS.items():
+        # Формируем кнопку: Название тарифа — Цена USDT
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"{plan['name']} — {plan['crypto']} USDT", 
+                callback_data=f"c_pay:{pid}"
+            )
+        ])
+    
+    # Добавляем кнопку возврата в главное меню
+    buttons.append([InlineKeyboardButton(text=back_btn, callback_data="main_back")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+@router.callback_query(F.data == "crypto_menu")
+async def crypto_menu(call: CallbackQuery):
+    """Хендлер нажатия на кнопку Crypto в главном меню"""
+    await call.answer()
+    
+    lang = await get_lang(call.from_user.id)
+    
+    # Словарик с текстом заголовка
+    titles = {
+        "ru": "💎 Выбери период подписки (USDT):",
+        "en": "💎 Choose subscription period (USDT):",
+        "es": "💎 Elige el periodo de suscripción (USDT):",
+        "de": "💎 Abonnementzeitraum wählen (USDT):",
+        "fr": "💎 Choisissez la période d'abonnement (USDT):"
+    }
+    
+    text = titles.get(lang, titles["en"])
+    kb = await crypto_menu_kb(call.from_user.id)
+    
+    try:
+        await call.message.edit_text(text=text, reply_markup=kb)
+    except Exception as e:
+        logger.error(f"Error opening crypto menu: {e}")
+        # Если вдруг сообщение не редактируется, пробуем отправить новое
+        await call.message.answer(text=text, reply_markup=kb)
+
 # --- SETTINGS & INFO HANDLERS ---
 
 @router.callback_query(F.data == "settings")
