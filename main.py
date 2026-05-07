@@ -1355,13 +1355,7 @@ async def terms(call: CallbackQuery):
     )
     await call.answer()
 
-# --- PAYMENTS & JOIN ---
-JOIN_LINK = "https://t.me/+ffk7dB_5zPhkMWFk"
-
-ADMIN_ID = os.getenv("ADMIN_ID")
-if ADMIN_ID:
-    ADMIN_ID = int(ADMIN_ID)
-
+# --- PAYMENTS & JOIN (STARS SUCCESS) ---
 
 @router.pre_checkout_query()
 async def pre_checkout(pre: PreCheckoutQuery):
@@ -1372,10 +1366,9 @@ async def pre_checkout(pre: PreCheckoutQuery):
 async def success(message: Message):
     try:
         lang = await get_lang(message.from_user.id)
-
         payload = message.successful_payment.invoice_payload
 
-        # ⭐ только Stars
+        # ⭐ Фильтруем только платежи Stars
         if not payload.startswith("stars_"):
             return
 
@@ -1383,23 +1376,15 @@ async def success(message: Message):
         plan = PLANS.get(plan_id)
 
         if not plan:
-            await message.answer("❌ Error")
+            await message.answer("❌ Error: Plan not found")
             return
 
         days = plan["days"]
 
-        # 🎯 защита от повторной обработки (idempotency)
-        async with aiosqlite.connect(DB_NAME) as db:
-            async with db.execute(
-                "SELECT user_id FROM users WHERE user_id=? AND expiry IS NOT NULL",
-                (message.from_user.id,)
-            ) as cur:
-                already = await cur.fetchone()
-
-        # если хочешь строго — можно убрать этот блок
+        # 🎯 Начисляем время в базу
         await extend_user(message.from_user.id, days)
 
-        # 🔔 ADMIN NOTIFY
+        # 🔔 Уведомление админа
         if ADMIN_ID:
             try:
                 await notify_admin(
@@ -1408,40 +1393,49 @@ async def success(message: Message):
                     method="Stars ⭐"
                 )
             except Exception as e:
-                logging.error(f"Admin notification error: {e}")
+                logger.error(f"Admin notification error: {e}")
 
-        # 🌍 тексты
+        # 🌍 Локализация текстов
         texts = {
             "ru": (
-                "✅ Оплата прошла успешно!\n\n"
-                f"🎉 Доступ активирован на <b>{days} дней</b>\n\n"
-                "👇 Вступите в канал по кнопке ниже"
+                "✅ <b>Оплата прошла успешно!</b>\n\n"
+                f"🎉 Доступ активирован на <b>{days} дней</b>.\n\n"
+                "👇 Нажмите кнопку ниже, чтобы подать заявку в канал:"
             ),
             "en": (
-                "✅ Payment successful!\n\n"
-                f"🎉 Access activated for <b>{days} days</b>\n\n"
-                "👇 Join the channel below"
+                "✅ <b>Payment successful!</b>\n\n"
+                f"🎉 Access activated for <b>{days} days</b>.\n\n"
+                "👇 Click the button below to apply to the channel:"
             ),
             "es": (
-                "✅ Pago exitoso!\n\n"
-                f"🎉 Acceso activado por <b>{days} días</b>\n\n"
-                "👇 Entra al canal"
+                "✅ <b>¡Pago exitoso!</b>\n\n"
+                f"🎉 Acceso activado por <b>{days} días</b>.\n\n"
+                "👇 Haz clic en el botón de abajo para solicitar el acceso:"
             ),
             "de": (
-                "✅ Zahlung erfolgreich!\n\n"
-                f"🎉 Zugang für <b>{days} Tage</b> aktiviert\n\n"
-                "👇 Kanal beitreten"
+                "✅ <b>Zahlung erfolgreich!</b>\n\n"
+                f"🎉 Zugang für <b>{days} Tage</b> aktiviert.\n\n"
+                "👇 Klicke auf die Schaltfläche unten, um dich zu bewerben:"
             ),
             "fr": (
-                "✅ Paiement réussi!\n\n"
-                f"🎉 Accès activé pour <b>{days} jours</b>\n\n"
-                "👇 Rejoindre le canal"
+                "✅ <b>Paiement réussi !</b>\n\n"
+                f"🎉 Accès activé pour <b>{days} jours</b>.\n\n"
+                "👇 Cliquez sur le bouton ci-dessous pour postuler au canal :"
             ),
+        }
+
+        # Локализация кнопки
+        kb_text = {
+            "ru": "📢 Вступить в канал",
+            "en": "📢 Join Channel",
+            "es": "📢 Unirse",
+            "de": "📢 Beitreten",
+            "fr": "📢 Rejoindre"
         }
 
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(
-                text="📢 Join Channel",
+                text=kb_text.get(lang, kb_text["en"]),
                 url=JOIN_LINK
             )]
         ])
@@ -1453,7 +1447,7 @@ async def success(message: Message):
         )
 
     except Exception as e:
-        logging.error(f"Stars success error: {e}")
+        logger.error(f"Stars success error: {e}")
         await message.answer("❌ Error processing payment")
 
 
