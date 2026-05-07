@@ -548,56 +548,64 @@ async def get_or_create_invite(user_id: int, days: int):
 
         return link
 
-# ================== FIX: CRYPTO MENU LOGIC ==================
+# ================== FIX: CRYPTO MENU LOGIC (MULTILINGUAL) ==================
 
 async def crypto_menu_kb(user_id: int):
-    """Генерирует клавиатуру выбора тарифа для CryptoPay"""
+    """Генерирует клавиатуру выбора тарифа для CryptoPay с переводом"""
     lang = await get_lang(user_id)
     
-    # Текст для кнопки назад в зависимости от языка
+    # Переводы названий периодов
+    names = {
+        "ru": {"1": "1 день", "7": "7 дней", "30": "30 дней"},
+        "en": {"1": "1 day", "7": "7 days", "30": "30 days"},
+        "es": {"1": "1 día", "7": "7 días", "30": "30 días"},
+        "de": {"1": "1 Tag", "7": "7 Tage", "30": "30 Tage"},
+        "fr": {"1": "1 jour", "7": "7 jours", "30": "30 jours"}
+    }
+    
+    # Текст для кнопки назад
     back_texts = {"ru": "⬅️ Назад", "en": "⬅️ Back", "es": "⬅️ Atrás", "de": "⬅️ Zurück", "fr": "⬅️ Retour"}
+    
+    l_names = names.get(lang, names["en"])
     back_btn = back_texts.get(lang, "⬅️ Back")
 
     buttons = []
     for pid, plan in PLANS.items():
-        # Формируем кнопку: Название тарифа — Цена USDT
+        # Берем перевод названия по ID тарифа (1, 7 или 30)
+        display_name = l_names.get(pid, plan["name"]) 
         buttons.append([
             InlineKeyboardButton(
-                text=f"{plan['name']} — {plan['crypto']} USDT", 
+                text=f"{display_name} — {plan['crypto']} USDT", 
                 callback_data=f"c_pay:{pid}"
             )
         ])
     
-    # Добавляем кнопку возврата в главное меню
     buttons.append([InlineKeyboardButton(text=back_btn, callback_data="main_back")])
-    
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 @router.callback_query(F.data == "crypto_menu")
 async def crypto_menu(call: CallbackQuery):
-    """Хендлер нажатия на кнопку Crypto в главном меню"""
+    """Хендлер выбора крипто-оплаты с информационным текстом"""
     await call.answer()
     
     lang = await get_lang(call.from_user.id)
     
-    # Словарик с текстом заголовка
-    titles = {
-        "ru": "💎 Выбери период подписки (USDT):",
-        "en": "💎 Choose subscription period (USDT):",
-        "es": "💎 Elige el periodo de suscripción (USDT):",
-        "de": "💎 Abonnementzeitraum wählen (USDT):",
-        "fr": "💎 Choisissez la période d'abonnement (USDT):"
+    # Тексты описания (по аналогии с картами)
+    messages = {
+        "ru": "💎 <b>Оплата через CryptoBot (USDT)</b>\n\nПосле успешной оплаты вам моментально придёт ссылка для входа в закрытый канал.\n\nВыберите тариф:",
+        "en": "💎 <b>Payment via CryptoBot (USDT)</b>\n\nAfter successful payment, you will instantly receive a link to join the private channel.\n\nSelect a plan:",
+        "es": "💎 <b>Pago vía CryptoBot (USDT)</b>\n\nTras el pago, recibirás al instante un enlace para entrar al canal privado.\n\nElige un plan:",
+        "de": "💎 <b>Zahlung über CryptoBot (USDT)</b>\n\nNach erfolgreicher Zahlung erhältst du sofort einen Link zum privaten Kanal.\n\nWähle einen Plan:",
+        "fr": "💎 <b>Paiement via CryptoBot (USDT)</b>\n\nAprès un paiement réussi, vous recevrez instantanément un lien pour rejoindre le canal privé.\n\nChoisissez un forfait:"
     }
     
-    text = titles.get(lang, titles["en"])
+    text = messages.get(lang, messages["en"])
     kb = await crypto_menu_kb(call.from_user.id)
     
     try:
-        await call.message.edit_text(text=text, reply_markup=kb)
-    except Exception as e:
-        logger.error(f"Error opening crypto menu: {e}")
-        # Если вдруг сообщение не редактируется, пробуем отправить новое
-        await call.message.answer(text=text, reply_markup=kb)
+        await call.message.edit_text(text=text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        await call.message.answer(text=text, reply_markup=kb, parse_mode="HTML")
 
 # --- SETTINGS & INFO HANDLERS ---
 
