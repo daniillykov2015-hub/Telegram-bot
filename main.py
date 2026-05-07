@@ -1457,7 +1457,7 @@ async def success(message: Message):
         await message.answer("❌ Error processing payment")
 
 
-JOIN_LINK = "https://t.me/+ffk7dB_5zPhkMWFk"
+# ================== CARD CHECKER (FIXED & MULTILINGUAL) ==================
 
 async def card_checker():
     while True:
@@ -1469,20 +1469,15 @@ async def card_checker():
                     invoices = await cur.fetchall()
 
             if not invoices:
-                await asyncio.sleep(5)
+                await asyncio.sleep(10) # Можно чуть реже, чтобы не спамить API
                 continue
 
             for transaction_id, user_id, plan_id in invoices:
-
                 try:
-                    # 🔒 сразу помечаем как processing (анти double trigger)
+                    # 🔒 Блокируем запись (анти-дубль)
                     async with aiosqlite.connect(DB_NAME) as db:
                         cursor = await db.execute(
-                            """
-                            UPDATE card_invoices
-                            SET status='processing'
-                            WHERE payload=? AND status='pending'
-                            """,
+                            "UPDATE card_invoices SET status='processing' WHERE payload=? AND status='pending'",
                             (transaction_id,)
                         )
                         await db.commit()
@@ -1490,6 +1485,7 @@ async def card_checker():
                     if cursor.rowcount == 0:
                         continue
 
+                    # Запрос к Platega
                     async with http_session.get(
                         f"https://app.platega.io/transaction/{transaction_id}",
                         headers={
@@ -1497,58 +1493,59 @@ async def card_checker():
                             "X-Secret": PAYMENT_TOKEN
                         }
                     ) as resp:
-
                         if resp.status != 200:
+                            # Если ошибка сервера — возвращаем в pending
+                            async with aiosqlite.connect(DB_NAME) as db:
+                                await db.execute("UPDATE card_invoices SET status='pending' WHERE payload=?", (transaction_id,))
+                                await db.commit()
                             continue
-
                         data = await resp.json()
 
                     status = str(data.get("status", "")).upper()
 
                     if status not in ("CONFIRMED", "SUCCESS", "PAID"):
-                        # возвращаем обратно pending
+                        # Возвращаем в pending для следующей итерации
                         async with aiosqlite.connect(DB_NAME) as db:
-                            await db.execute(
-                                "UPDATE card_invoices SET status='pending' WHERE payload=?",
-                                (transaction_id,)
-                            )
+                            await db.execute("UPDATE card_invoices SET status='pending' WHERE payload=?", (transaction_id,))
                             await db.commit()
                         continue
 
-                    days = PLANS[plan_id]["days"]
-
+                    # --- ОПЛАТА ПОДТВЕРЖДЕНА ---
+                    plan = PLANS[plan_id]
+                    days = plan["days"]
                     await extend_user(user_id, days)
 
-                    if ADMIN_ID:
-                        try:
-                            await notify_admin(
-                                user_id=user_id,
-                                plan_name=PLANS[plan_id]["name"],
-                                method="Card / SBP 💳",
-                                extra=f"Tx: <code>{transaction_id}</code>"
-                            )
-                        except Exception as e:
-                            logger.error(f"Admin notify error: {e}")
+                    # Фиксируем финальный статус
+                    async with aiosqlite.connect(DB_NAME) as db:
+                        await db.execute("UPDATE card_invoices SET status='paid' WHERE payload=?", (transaction_id,))
+                        await db.commit()
 
-                    text = (
-                        "✅ Payment successful!\n\n"
-                        f"🎉 Access: <b>{days} days</b>\n\n"
-                        "👇 Join the channel below"
-                    )
+                    # Локализация уведомления
+                    lang = await get_lang(user_id)
+                    
+                    congrats_map = {
+                        "ru": f"✅ <b>Оплата картой/СБП принята!</b>\n\nВам начислено {days} дней доступа.\n\n👇 Нажмите кнопку, чтобы подать заявку в канал:",
+                        "en": f"✅ <b>Card/SBP payment confirmed!</b>\n\nAdded {days} days of access.\n\n👇 Click the button to apply to the channel:",
+                        "es": f"✅ <b>¡Pago confirmado!</b>\n\nSe han añadido {days} días.\n\n👇 Haz clic para solicitar acceso:",
+                        "de": f"✅ <b>Zahlung bestätigt!</b>\n\n{days} Tage Zugang hinzugefügt.\n\n👇 Klicke, um dich zu bewerben:",
+                        "fr": f"✅ <b>Paiement confirmé !</b>\n\n{days} jours ajoutés.\n\n👇 Cliquez pour postuler au canal :"
+                    }
+                    
+                    kb_text = {"ru": "📢 Вступить в канал", "en": "📢 Join Channel", "es": "📢 Unirse", "de": "📢 Beitreten", "fr": "📢 Rejoindre"}
 
                     kb = InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(
-                            text="📢 Join Channel",
-                            url=JOIN_LINK
-                        )]
+                        [InlineKeyboardButton(text=kb_text.get(lang, kb_text["en"]), url=JOIN_LINK)]
                     ])
 
                     await bot.send_message(
                         user_id,
-                        text,
+                        congrats_map.get(lang, congrats_map["en"]),
                         reply_markup=kb,
                         parse_mode="HTML"
                     )
+
+                    if ADMIN_ID:
+                        await notify_admin(user_id, plan["name"], "Card / SBP 💳", f"Tx: <code>{transaction_id}</code>")
 
                 except Exception as e:
                     logger.error(f"Card inner error: {e}")
@@ -1556,9 +1553,9 @@ async def card_checker():
         except Exception as e:
             logger.error(f"Card checker loop error: {e}")
 
-        await asyncio.sleep(5)
+        await asyncio.sleep(10)
 
-# ================== ШАГ 3: УЛУЧШЕННЫЙ КРИПТО ЧЕКЕР ==================
+# ================== ШАГ 3: КРИПТО ЧЕКЕР (ФИНАЛЬНАЯ ВЕРСИЯ) ==================
 
 async def crypto_checker():
     while True:
@@ -1575,7 +1572,7 @@ async def crypto_checker():
 
             for inv_id, user_id, plan_id in invoices:
                 try:
-                    # 🔒 Блокируем обработку: ставим статус 'processing'
+                    # 🔒 Блокируем обработку в базе
                     async with aiosqlite.connect(DB_NAME) as db:
                         cursor = await db.execute(
                             "UPDATE crypto_invoices SET status='processing' WHERE invoice_id=? AND status='pending'",
@@ -1586,7 +1583,7 @@ async def crypto_checker():
                     if cursor.rowcount == 0:
                         continue
 
-                    # Запрос к API
+                    # Проверка статуса в CryptoBot API
                     async with http_session.get(
                         "https://pay.crypt.bot/api/getInvoices",
                         headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
@@ -1604,7 +1601,7 @@ async def crypto_checker():
                     status = items[0].get("status")
 
                     if status != "paid":
-                        # Если не оплачено — возвращаем в pending
+                        # Если не оплачено — возвращаем статус pending
                         async with aiosqlite.connect(DB_NAME) as db:
                             await db.execute(
                                 "UPDATE crypto_invoices SET status='pending' WHERE invoice_id=?",
@@ -1617,10 +1614,10 @@ async def crypto_checker():
                     plan = PLANS[plan_id]
                     days = plan["days"]
 
-                    # 1. Продлеваем подписку
+                    # 1. Продлеваем время в БД
                     await extend_user(user_id, days)
                     
-                    # 2. Ставим финальный статус
+                    # 2. Фиксируем успешную оплату в таблице инвойсов
                     async with aiosqlite.connect(DB_NAME) as db:
                         await db.execute(
                             "UPDATE crypto_invoices SET status='paid' WHERE invoice_id=?",
@@ -1628,24 +1625,21 @@ async def crypto_checker():
                         )
                         await db.commit()
 
-                    # 3. Генерируем персональную ссылку
-                    invite_link = await get_or_create_invite(user_id, days)
-
-                    # 4. Уведомление пользователя на его языке
+                    # 3. Уведомление пользователя (используем JOIN_LINK)
                     lang = await get_lang(user_id)
                     
                     congrats_map = {
-                        "ru": f"✅ <b>Оплата подтверждена!</b>\n\nВам начислено {days} дней доступа.\n\n👇 Ваша ссылка для входа:",
-                        "en": f"✅ <b>Payment confirmed!</b>\n\nAdded {days} days of access.\n\n👇 Your entry link:",
-                        "es": f"✅ <b>¡Pago confirmado!</b>\n\nSe han añadido {days} días.\n\n👇 Tu enlace:",
-                        "de": f"✅ <b>Zahlung bestätigt!</b>\n\n{days} Tage Zugang hinzugefügt.\n\n👇 Dein Link:",
-                        "fr": f"✅ <b>Paiement confirmé !</b>\n\n{days} jours ajoutés.\n\n👇 Votre lien :"
+                        "ru": "✅ <b>Оплата подтверждена!</b>\n\nПосле оплаты вам придет ссылка в закрытый канал.\n\n👇 Нажмите кнопку ниже, чтобы подать заявку:",
+                        "en": "✅ <b>Payment confirmed!</b>\n\nA link to the private channel will be sent to you.\n\n👇 Click the button below to apply:",
+                        "es": "✅ <b>¡Pago confirmado!</b>\n\nSe te enviará un enlace al canal privado.\n\n👇 Haz clic abajo для подачи заявки:",
+                        "de": "✅ <b>Zahlung bestätigt!</b>\n\nEin Link zum privaten Kanal wird dir zugesendet.\n\n👇 Klicke unten, um dich zu bewerben:",
+                        "fr": "✅ <b>Paiement confirmé !</b>\n\nUn lien vers le canal privé vous sera envoyé.\n\n👇 Cliquez ci-dessous pour postuler :"
                     }
                     
-                    kb_text = {"ru": "📢 Войти в канал", "en": "📢 Join Channel", "es": "📢 Unirse", "de": "📢 Beitreten", "fr": "📢 Rejoindre"}
+                    kb_text = {"ru": "📢 Вступить в канал", "en": "📢 Join Channel", "es": "📢 Unirse", "de": "📢 Beitreten", "fr": "📢 Rejoindre"}
 
                     kb = InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text=kb_text.get(lang, kb_text["en"]), url=invite_link)]
+                        [InlineKeyboardButton(text=kb_text.get(lang, kb_text["en"]), url=JOIN_LINK)]
                     ])
 
                     await bot.send_message(
@@ -1655,7 +1649,7 @@ async def crypto_checker():
                         parse_mode="HTML"
                     )
 
-                    # 5. Уведомление админа
+                    # 4. Уведомление админа
                     if ADMIN_ID:
                         await notify_admin(
                             user_id=user_id,
