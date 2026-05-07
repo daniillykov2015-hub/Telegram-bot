@@ -608,31 +608,56 @@ async def show_lang_menu_callback(call: CallbackQuery):
     await call.answer()
 
 
-# ================== CRYPTO MENU ==================
-@router.callback_query(F.data == "crypto_menu")
+# --- CRYPTO MENU ---
+@router.callback_query(F.data == "crypto")
 async def crypto_menu(call: CallbackQuery):
+    lang = await get_lang(call.from_user.id)
+
+    text_map = {
+        "ru": (
+            "💰 <b>Оплата Crypto</b>\n\n"
+            "После оплаты вы получите доступ к каналу автоматически.\n"
+            "👇 Выберите тариф"
+        ),
+        "en": (
+            "💰 <b>Crypto Payment</b>\n\n"
+            "After payment you will get access automatically.\n"
+            "👇 Choose a plan"
+        ),
+        "es": (
+            "💰 <b>Pago Crypto</b>\n\n"
+            "Después del pago obtendrás acceso automáticamente.\n"
+            "👇 Elige un plan"
+        ),
+        "de": (
+            "💰 <b>Krypto Zahlung</b>\n\n"
+            "Nach der Zahlung erhältst du automatisch Zugang.\n"
+            "👇 Wähle einen Tarif"
+        ),
+        "fr": (
+            "💰 <b>Paiement Crypto</b>\n\n"
+            "Après paiement, l’accès sera activé automatiquement.\n"
+            "👇 Choisissez un plan"
+        ),
+    }
+
+    # кнопки тарифов
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💰 1 день", callback_data="crypto_confirm:1")],
-        [InlineKeyboardButton(text="💰 7 дней", callback_data="crypto_confirm:7")],
-        [InlineKeyboardButton(text="💰 30 дней", callback_data="crypto_confirm:30")],
-        [InlineKeyboardButton(text="⬅ Back", callback_data="back")]
+        [
+            InlineKeyboardButton(text=f"{p['name']} — {p['crypto']} USDT",
+                                 callback_data=f"crypto_confirm:{k}")
+        ]
+        for k, p in PLANS.items()
+    ])
+
+    kb.inline_keyboard.append([
+        InlineKeyboardButton(text="⬅ Back", callback_data="back")
     ])
 
     await call.message.edit_text(
-        "💰 <b>Crypto Payment</b>\n\nВыберите тариф:",
+        text_map.get(lang, text_map["en"]),
         reply_markup=kb,
         parse_mode="HTML"
-    )
-    await call.answer()
-
-# ================== BACK ==================
-@router.callback_query(F.data == "back")
-async def back(call: CallbackQuery):
-    lang = await get_lang(call.from_user.id)
-
-    await call.message.edit_text(
-        TEXTS[lang]["main"],
-        reply_markup=await main_menu_kb(call.from_user.id)
     )
 
     await call.answer()
@@ -1103,9 +1128,11 @@ async def card_confirm(call: CallbackQuery):
 
     await call.answer()
 
-# ================== CRYPTO CONFIRM ==================
+# --- CRYPTO CONFIRM ---
 @router.callback_query(F.data.startswith("crypto_confirm:"))
 async def crypto_confirm(call: CallbackQuery):
+    await call.answer()
+
     lang = await get_lang(call.from_user.id)
 
     plan_id = call.data.split(":")[1]
@@ -1115,6 +1142,7 @@ async def crypto_confirm(call: CallbackQuery):
         await call.answer("❌ Error", show_alert=True)
         return
 
+    # 🔥 правильные переводы времени (НЕ используем plan['name'])
     time_units = {
         "ru": {"1": "день", "7": "дней", "30": "дней"},
         "en": {"1": "day", "7": "days", "30": "days"},
@@ -1124,12 +1152,13 @@ async def crypto_confirm(call: CallbackQuery):
     }
 
     units = time_units.get(lang, time_units["en"])
-
     days_count = str(plan["days"])
-    translated_plan_name = f"{days_count} {units.get(days_count, 'day')}"
+    translated_plan_name = f"{days_count} {units.get(days_count, 'd.')}"
+
 
     try:
-        ui_text = {
+        # --- loading ---
+        loading = {
             "ru": "💰 Создание инвойса...",
             "en": "💰 Creating invoice...",
             "es": "💰 Creando factura...",
@@ -1137,8 +1166,11 @@ async def crypto_confirm(call: CallbackQuery):
             "fr": "💰 Création de facture..."
         }
 
-        await call.message.edit_text(ui_text.get(lang, ui_text["en"]))
+        await call.message.edit_text(
+            loading.get(lang, loading["en"])
+        )
 
+        # --- API ---
         async with http_session.post(
             "https://pay.crypt.bot/api/createInvoice",
             headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
@@ -1165,24 +1197,48 @@ async def crypto_confirm(call: CallbackQuery):
         pay_url = result["pay_url"]
         invoice_id = str(result["invoice_id"])
 
+        # --- save ---
         async with aiosqlite.connect(DB_NAME) as db:
             await db.execute(
-                "INSERT OR IGNORE INTO crypto_invoices (invoice_id, user_id, plan_id, status) VALUES (?, ?, ?, 'pending')",
+                "INSERT OR IGNORE INTO crypto_invoices VALUES (?, ?, ?, 'pending')",
                 (invoice_id, call.from_user.id, plan_id)
             )
             await db.commit()
 
+        # --- FINAL TEXT (как SBP) ---
         final_text = {
-            "ru": f"💰 <b>{translated_plan_name}</b>\n💵 {plan['crypto']} USDT\n\n👇 Нажмите для оплаты",
-            "en": f"💰 <b>{translated_plan_name}</b>\n💵 {plan['crypto']} USDT\n\n👇 Click to pay",
-            "es": f"💰 <b>{translated_plan_name}</b>\n💵 {plan['crypto']} USDT\n\n👇 Paga aquí",
-            "de": f"💰 <b>{translated_plan_name}</b>\n💵 {plan['crypto']} USDT\n\n👇 Bezahlen",
-            "fr": f"💰 <b>{translated_plan_name}</b>\n💵 {plan['crypto']} USDT\n\n👇 Payer",
+            "ru": (
+                f"💰 <b>{translated_plan_name}</b>\n"
+                f"💵 {plan['crypto']} USDT\n\n"
+                "💡 После оплаты доступ будет выдан автоматически\n\n"
+                "👇 Нажмите для оплаты"
+            ),
+            "en": (
+                f"💰 <b>{translated_plan_name}</b>\n"
+                f"💵 {plan['crypto']} USDT\n\n"
+                "💡 After payment access will be activated automatically\n\n"
+                "👇 Click to pay"
+            ),
+            "es": (
+                f"💰 <b>{translated_plan_name}</b>\n"
+                f"💵 {plan['crypto']} USDT\n\n"
+                "👇 Paga aquí"
+            ),
+            "de": (
+                f"💰 <b>{translated_plan_name}</b>\n"
+                f"💵 {plan['crypto']} USDT\n\n"
+                "👇 Bezahlen"
+            ),
+            "fr": (
+                f"💰 <b>{translated_plan_name}</b>\n"
+                f"💵 {plan['crypto']} USDT\n\n"
+                "👇 Payer"
+            ),
         }
 
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="💸 Pay", url=pay_url)],
-            [InlineKeyboardButton(text="⬅ Back", callback_data="crypto_menu")]
+            [InlineKeyboardButton(text="⬅ Back", callback_data="crypto")]
         ])
 
         await call.message.edit_text(
@@ -1194,8 +1250,6 @@ async def crypto_confirm(call: CallbackQuery):
     except Exception as e:
         logger.error(f"Crypto error: {e}")
         await call.message.answer("❌ Payment error")
-
-    await call.answer()
 # --- REFERRAL ---
 @router.callback_query(F.data == "ref")
 async def ref(call: CallbackQuery):
