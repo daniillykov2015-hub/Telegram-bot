@@ -466,14 +466,13 @@ async def main_menu_kb(user_id: int):
         ],
         [
             InlineKeyboardButton(text=t["stars"], callback_data="stars"),
-            InlineKeyboardButton(text=t["crypto"], callback_data="crypto"),
+            InlineKeyboardButton(text=t["crypto"], callback_data="crypto_menu"),
         ],
         [
             InlineKeyboardButton(text=t["ref"], callback_data="ref"),
             InlineKeyboardButton(text=t["support"], url="https://t.me/mistybibi"),
         ],
         [
-            # Заменили info на settings
             InlineKeyboardButton(text=t["settings"], callback_data="settings"),
         ]
     ])
@@ -605,6 +604,23 @@ async def show_lang_menu_callback(call: CallbackQuery):
     await call.message.edit_text(
         "🌍 Choose your language / Выберите язык",
         reply_markup=LANG_KB
+    )
+    await call.answer()
+
+# ================== CRYPTO MENU ==================
+@router.callback_query(F.data == "crypto_menu")
+async def crypto_menu(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💰 1 день", callback_data="crypto_confirm:1")],
+        [InlineKeyboardButton(text="💰 7 дней", callback_data="crypto_confirm:7")],
+        [InlineKeyboardButton(text="💰 30 дней", callback_data="crypto_confirm:30")],
+        [InlineKeyboardButton(text="⬅ Back", callback_data="back")]
+    ])
+
+    await call.message.edit_text(
+        "💰 <b>Crypto Payment</b>\n\nВыберите тариф:",
+        reply_markup=kb,
+        parse_mode="HTML"
     )
     await call.answer()
 
