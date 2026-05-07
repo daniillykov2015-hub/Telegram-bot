@@ -1077,16 +1077,18 @@ async def card_confirm(call: CallbackQuery):
 # --- CRYPTO CONFIRM ---
 @router.callback_query(F.data.startswith("crypto_confirm:"))
 async def crypto_confirm(call: CallbackQuery):
+    await call.answer()  # ⚡ сразу отвечаем на callback
+
     lang = await get_lang(call.from_user.id)
 
     plan_id = call.data.split(":")[1]
     plan = PLANS.get(plan_id)
 
     if not plan:
-        await call.message.answer("❌ Error")
+        await call.answer("❌ Error", show_alert=True)
         return
 
-    # Логика перевода названия тарифа (например, "1 день" -> "1 day")
+    # --- перевод тарифа ---
     time_units = {
         "ru": {"1": "день", "7": "дней", "30": "дней"},
         "en": {"1": "day", "7": "days", "30": "days"},
@@ -1094,12 +1096,13 @@ async def crypto_confirm(call: CallbackQuery):
         "de": {"1": "Tag", "7": "Tage", "30": "Tage"},
         "fr": {"1": "jour", "7": "jours", "30": "jours"}
     }
+
     units = time_units.get(lang, time_units["en"])
-    days_count = "".join(filter(str.isdigit, plan['name']))
+    days_count = "".join(filter(str.isdigit, plan["name"]))
     translated_plan_name = f"{days_count} {units.get(days_count, 'd.')}"
 
     try:
-        # --- тексты загрузки ---
+        # --- loading UI ---
         ui_text = {
             "ru": "💰 Создание инвойса...",
             "en": "💰 Creating invoice...",
@@ -1108,7 +1111,11 @@ async def crypto_confirm(call: CallbackQuery):
             "fr": "💰 Création de facture..."
         }
 
-        # 💡 создаём инвойс
+        await call.message.edit_text(
+            ui_text.get(lang, ui_text["en"])
+        )
+
+        # --- Crypto API request ---
         async with http_session.post(
             "https://pay.crypt.bot/api/createInvoice",
             headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
@@ -1133,6 +1140,7 @@ async def crypto_confirm(call: CallbackQuery):
                 await call.message.answer("❌ Invalid response from CryptoBot")
                 return
 
+        # --- validate response ---
         if not isinstance(data, dict) or not data.get("ok"):
             logger.error(f"Crypto API bad response: {data}")
             await call.message.answer("❌ Payment error")
@@ -1146,18 +1154,19 @@ async def crypto_confirm(call: CallbackQuery):
             await call.message.answer("❌ Invalid invoice data")
             return
 
-        # 💡 сохраняем инвойс в БД
+        # --- save invoice ---
         async with aiosqlite.connect(DB_NAME) as db:
             await db.execute(
-                "INSERT OR IGNORE INTO crypto_invoices (invoice_id, user_id, plan_id, status) VALUES (?, ?, ?, 'pending')",
+                """
+                INSERT OR IGNORE INTO crypto_invoices 
+                (invoice_id, user_id, plan_id, status)
+                VALUES (?, ?, ?, 'pending')
+                """,
                 (invoice_id, call.from_user.id, plan_id)
             )
             await db.commit()
 
-        await call.answer("⏳")
-        await call.message.edit_text(ui_text.get(lang, ui_text["en"]))
-
-        # --- финальный текст с переведенным планом ---
+        # --- final UI ---
         final_text = {
             "ru": (
                 f"💰 <b>{translated_plan_name}</b>\n"
@@ -1200,8 +1209,6 @@ async def crypto_confirm(call: CallbackQuery):
     except Exception as e:
         logger.error(f"Crypto createInvoice error: {e}")
         await call.message.answer("❌ Payment error")
-
-    await call.answer()
 # --- REFERRAL ---
 @router.callback_query(F.data == "ref")
 async def ref(call: CallbackQuery):
