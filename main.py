@@ -1558,6 +1558,8 @@ async def card_checker():
 
         await asyncio.sleep(5)
 
+# ================== ШАГ 3: УЛУЧШЕННЫЙ КРИПТО ЧЕКЕР ==================
+
 async def crypto_checker():
     while True:
         try:
@@ -1572,16 +1574,11 @@ async def crypto_checker():
                 continue
 
             for inv_id, user_id, plan_id in invoices:
-
                 try:
-                    # 🔒 блокируем обработку сразу
+                    # 🔒 Блокируем обработку: ставим статус 'processing'
                     async with aiosqlite.connect(DB_NAME) as db:
                         cursor = await db.execute(
-                            """
-                            UPDATE crypto_invoices
-                            SET status='processing'
-                            WHERE invoice_id=? AND status='pending'
-                            """,
+                            "UPDATE crypto_invoices SET status='processing' WHERE invoice_id=? AND status='pending'",
                             (inv_id,)
                         )
                         await db.commit()
@@ -1589,21 +1586,16 @@ async def crypto_checker():
                     if cursor.rowcount == 0:
                         continue
 
+                    # Запрос к API
                     async with http_session.get(
                         "https://pay.crypt.bot/api/getInvoices",
                         headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
                         params={"invoice_ids": inv_id}
                     ) as resp:
-
                         if resp.status != 200:
                             logger.error(f"Crypto HTTP error: {resp.status}")
                             continue
-
                         data = await resp.json()
-
-                    if not isinstance(data, dict) or not data.get("ok"):
-                        logger.error(f"Crypto API error: {data}")
-                        continue
 
                     items = data.get("result", {}).get("items", [])
                     if not items:
@@ -1612,7 +1604,7 @@ async def crypto_checker():
                     status = items[0].get("status")
 
                     if status != "paid":
-                        # вернуть обратно pending
+                        # Если не оплачено — возвращаем в pending
                         async with aiosqlite.connect(DB_NAME) as db:
                             await db.execute(
                                 "UPDATE crypto_invoices SET status='pending' WHERE invoice_id=?",
@@ -1621,40 +1613,56 @@ async def crypto_checker():
                             await db.commit()
                         continue
 
-                    days = PLANS[plan_id]["days"]
+                    # --- ОПЛАТА ПОДТВЕРЖДЕНА ---
+                    plan = PLANS[plan_id]
+                    days = plan["days"]
 
+                    # 1. Продлеваем подписку
                     await extend_user(user_id, days)
+                    
+                    # 2. Ставим финальный статус
+                    async with aiosqlite.connect(DB_NAME) as db:
+                        await db.execute(
+                            "UPDATE crypto_invoices SET status='paid' WHERE invoice_id=?",
+                            (inv_id,)
+                        )
+                        await db.commit()
 
-                    if ADMIN_ID:
-                        try:
-                            await notify_admin(
-                                user_id=user_id,
-                                plan_name=PLANS[plan_id]["name"],
-                                method="Crypto 💰",
-                                extra=f"Invoice: <code>{inv_id}</code>"
-                            )
-                        except Exception as e:
-                            logger.error(f"Admin notify error: {e}")
+                    # 3. Генерируем персональную ссылку
+                    invite_link = await get_or_create_invite(user_id, days)
 
-                    text = (
-                        "✅ Crypto payment confirmed!\n\n"
-                        f"🎉 Access: <b>{days} days</b>\n\n"
-                        "👇 Join the channel below"
-                    )
+                    # 4. Уведомление пользователя на его языке
+                    lang = await get_lang(user_id)
+                    
+                    congrats_map = {
+                        "ru": f"✅ <b>Оплата подтверждена!</b>\n\nВам начислено {days} дней доступа.\n\n👇 Ваша ссылка для входа:",
+                        "en": f"✅ <b>Payment confirmed!</b>\n\nAdded {days} days of access.\n\n👇 Your entry link:",
+                        "es": f"✅ <b>¡Pago confirmado!</b>\n\nSe han añadido {days} días.\n\n👇 Tu enlace:",
+                        "de": f"✅ <b>Zahlung bestätigt!</b>\n\n{days} Tage Zugang hinzugefügt.\n\n👇 Dein Link:",
+                        "fr": f"✅ <b>Paiement confirmé !</b>\n\n{days} jours ajoutés.\n\n👇 Votre lien :"
+                    }
+                    
+                    kb_text = {"ru": "📢 Войти в канал", "en": "📢 Join Channel", "es": "📢 Unirse", "de": "📢 Beitreten", "fr": "📢 Rejoindre"}
 
                     kb = InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(
-                            text="📢 Join Channel",
-                            url=JOIN_LINK
-                        )]
+                        [InlineKeyboardButton(text=kb_text.get(lang, kb_text["en"]), url=invite_link)]
                     ])
 
                     await bot.send_message(
                         user_id,
-                        text,
+                        congrats_map.get(lang, congrats_map["en"]),
                         reply_markup=kb,
                         parse_mode="HTML"
                     )
+
+                    # 5. Уведомление админа
+                    if ADMIN_ID:
+                        await notify_admin(
+                            user_id=user_id,
+                            plan_name=plan["name"],
+                            method="Crypto 💰",
+                            extra=f"Invoice: <code>{inv_id}</code>"
+                        )
 
                 except Exception as e:
                     logger.error(f"Crypto inner error: {e}")
