@@ -221,7 +221,7 @@ PLANS = {
         "name": "1 день", 
         "days": 1,
         "rub": 690,    
-        "stars": 790,  
+        "stars": 10,  
         "crypto": 9    
     },
     "7": {
@@ -785,60 +785,54 @@ async def stars_confirm(call: CallbackQuery):
     plan = PLANS.get(plan_id)
 
     if not plan:
-        await call.answer("❌ Error", show_alert=True)
+        await call.answer("❌ Error: Plan not found", show_alert=True)
         return
 
     try:
-        invoice_link = await bot.create_invoice_link(
+        # Используем call.message.bot для надежности
+        invoice_link = await call.message.bot.create_invoice_link(
             title="Subscription",
-            description=f"Access for {plan['name']}",
-            payload=f"stars_{plan_id}",
-            provider_token="",
-            currency="XTR",
-            prices=[LabeledPrice(label="Stars", amount=plan["stars"])]
+            description=f"Access: {plan['name']}",
+            payload=f"stars_{plan_id}", # Тот самый payload, который мы ловим в success_payment
+            provider_token="",          # Для Stars всегда пусто
+            currency="XTR",             # Валюта Stars
+            prices=[types.LabeledPrice(label="Stars", amount=plan["stars"])]
         )
     except Exception as e:
+        logger.error(f"Invoice creation error: {e}")
         await call.answer("❌ Invoice error", show_alert=True)
         return
 
     text_map = {
-        "ru": (
-            f"📦 <b>{plan['name']}</b>\n"
-            f"💰 {plan['stars']} ⭐\n\n"
-            "👇 Нажмите кнопку ниже для оплаты"
-        ),
-        "en": (
-            f"📦 <b>{plan['name']}</b>\n"
-            f"💰 {plan['stars']} ⭐\n\n"
-            "👇 Click the button below to pay"
-        ),
-        "es": (
-            f"📦 <b>{plan['name']}</b>\n"
-            f"💰 {plan['stars']} ⭐\n\n"
-            "👇 Haz clic para pagar"
-        ),
-        "de": (
-            f"📦 <b>{plan['name']}</b>\n"
-            f"💰 {plan['stars']} ⭐\n\n"
-            "👇 Klicke zum Bezahlen"
-        ),
-        "fr": (
-            f"📦 <b>{plan['name']}</b>\n"
-            f"💰 {plan['stars']} ⭐\n\n"
-            "👇 Cliquez pour payer"
-        ),
+        "ru": f"📦 <b>{plan['name']}</b>\n💰 {plan['stars']} ⭐\n\n👇 Нажмите кнопку ниже для оплаты",
+        "en": f"📦 <b>{plan['name']}</b>\n💰 {plan['stars']} ⭐\n\n👇 Click the button below to pay",
+        "es": f"📦 <b>{plan['name']}</b>\n💰 {plan['stars']} ⭐\n\n👇 Haz clic para pagar",
+        "de": f"📦 <b>{plan['name']}</b>\n💰 {plan['stars']} ⭐\n\n👇 Klicke zum Bezahlen",
+        "fr": f"📦 <b>{plan['name']}</b>\n💰 {plan['stars']} ⭐\n\n👇 Cliquez pour payer",
+    }
+
+    # Локализация кнопок
+    pay_btn_text = {
+        "ru": "💸 Оплатить", "en": "💸 Pay", "es": "💸 Pagar", "de": "💸 Bezahlen", "fr": "💸 Payer"
+    }
+    back_btn_text = {
+        "ru": "⬅ Назад", "en": "⬅ Back", "es": "⬅ Volver", "de": "⬅ Zurück", "fr": "⬅ Retour"
     }
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💸 Pay", url=invoice_link)],
-        [InlineKeyboardButton(text="⬅ Back", callback_data="stars")]
+        [InlineKeyboardButton(text=pay_btn_text.get(lang, pay_btn_text["en"]), url=invoice_link)],
+        [InlineKeyboardButton(text=back_btn_text.get(lang, back_btn_text["en"]), callback_data="stars")]
     ])
 
-    await call.message.edit_text(
-        text_map.get(lang, text_map["en"]),
-        reply_markup=kb,
-        parse_mode="HTML"
-    )
+    try:
+        await call.message.edit_text(
+            text_map.get(lang, text_map["en"]),
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+    except Exception:
+        # Если сообщение не изменилось или удалено, просто игнорируем
+        pass
 
     await call.answer()
 
@@ -1359,84 +1353,85 @@ async def terms(call: CallbackQuery):
 
 @router.pre_checkout_query()
 async def pre_checkout(pre: PreCheckoutQuery):
-    await pre.answer(ok=True)
-
-
-@router.message(F.successful_payment)
-async def success(message: Message):
     try:
-        lang = await get_lang(message.from_user.id)
-        payload = message.successful_payment.invoice_payload
+        await pre.answer(ok=True)
+    except Exception as e:
+        logger.error(f"Ошибка в pre_checkout: {e}")
 
-        # ⭐ Фильтруем только платежи Stars
-        if not payload.startswith("stars_"):
+# --- 2. ОБРАБОТКА УСПЕШНОЙ ОПЛАТЫ ---
+@router.message(F.successful_payment)
+async def success_payment_handler(message: Message):
+    try:
+        # Получаем данные о платеже
+        payment_info = message.successful_payment
+        payload = payment_info.invoice_payload
+
+        # Проверка, что это именно наш платеж через Stars
+        if not payload or not payload.startswith("stars_"):
+            logger.warning(f"Получен неизвестный платеж: {payload}")
             return
 
-        plan_id = payload.split("_")[1]
+        # Извлекаем ID тарифа (например, из 'stars_premium_30' получим 'premium_30')
+        plan_id = payload.replace("stars_", "")
         plan = PLANS.get(plan_id)
 
         if not plan:
-            await message.answer("❌ Error: Plan not found")
+            logger.error(f"Тариф {plan_id} не найден в словаре PLANS!")
+            await message.answer("❌ Error: Payment plan not found. Please contact support.")
             return
 
-        days = plan["days"]
+        days = plan.get("days", 0)
+        user_id = message.from_user.id
+        username = f"@{message.from_user.username}" if message.from_user.username else "No Username"
 
-        # 🎯 Начисляем время в базу
-        await extend_user(message.from_user.id, days)
+        # 🎯 ОБНОВЛЕНИЕ БАЗЫ ДАННЫХ
+        # Начисляем пользователю дни доступа
+        await extend_user(user_id, days)
 
-        # 🔔 Уведомление админа
+        # 🔔 УВЕДОМЛЕНИЕ АДМИНА
         if ADMIN_ID:
             try:
-                await notify_admin(
-                    user_id=message.from_user.id,
-                    plan_name=plan["name"],
-                    method="Stars ⭐"
+                # Текст для админа, чтобы удобно было добавлять вручную
+                admin_text = (
+                    f"⭐ <b>Новая оплата Stars!</b>\n\n"
+                    f"👤 Пользователь: {message.from_user.full_name} ({username})\n"
+                    f"🆔 ID: <code>{user_id}</code>\n"
+                    f"📦 Тариф: {plan['name']}\n"
+                    f"💰 Сумма: {payment_info.total_amount} ⭐"
                 )
-            except Exception as e:
-                logger.error(f"Admin notification error: {e}")
+                # Предполагается, что бот (bot) доступен глобально или через message.bot
+                await message.bot.send_message(chat_id=ADMIN_ID, text=admin_text, parse_mode="HTML")
+            except Exception as admin_err:
+                logger.error(f"Не удалось уведомить админа: {admin_err}")
 
-        # 🌍 Локализация текстов
+        # 🌍 ВЫДАЧА ССЫЛКИ ПОЛЬЗОВАТЕЛЮ (ЛОКАЛИЗАЦИЯ)
+        lang = await get_lang(user_id)
+        
         texts = {
             "ru": (
-                "✅ <b>Оплата прошла успешно!</b>\n\n"
+                f"✅ <b>Оплата прошла успешно!</b>\n\n"
                 f"🎉 Доступ активирован на <b>{days} дней</b>.\n\n"
-                "👇 Нажмите кнопку ниже, чтобы подать заявку в канал:"
+                "👇 Нажмите кнопку ниже, чтобы подать заявку в закрытый канал. "
+                "Администратор одобрит её в ближайшее время."
             ),
             "en": (
-                "✅ <b>Payment successful!</b>\n\n"
+                f"✅ <b>Payment successful!</b>\n\n"
                 f"🎉 Access activated for <b>{days} days</b>.\n\n"
-                "👇 Click the button below to apply to the channel:"
-            ),
-            "es": (
-                "✅ <b>¡Pago exitoso!</b>\n\n"
-                f"🎉 Acceso activado por <b>{days} días</b>.\n\n"
-                "👇 Haz clic en el botón de abajo para solicitar el acceso:"
-            ),
-            "de": (
-                "✅ <b>Zahlung erfolgreich!</b>\n\n"
-                f"🎉 Zugang für <b>{days} Tage</b> aktiviert.\n\n"
-                "👇 Klicke auf die Schaltfläche unten, um dich zu bewerben:"
-            ),
-            "fr": (
-                "✅ <b>Paiement réussi !</b>\n\n"
-                f"🎉 Accès activé pour <b>{days} jours</b>.\n\n"
-                "👇 Cliquez sur le bouton ci-dessous pour postuler au canal :"
-            ),
+                "👇 Click the button below to apply for access. "
+                "The admin will approve it shortly."
+            )
         }
 
-        # Локализация кнопки
-        kb_text = {
-            "ru": "📢 Вступить в канал",
-            "en": "📢 Join Channel",
-            "es": "📢 Unirse",
-            "de": "📢 Beitreten",
-            "fr": "📢 Rejoindre"
+        kb_texts = {
+            "ru": "📢 Подать заявку в канал",
+            "en": "📢 Apply to Channel"
         }
 
+        # Клавиатура со ссылкой
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(
-                text=kb_text.get(lang, kb_text["en"]),
-                url=JOIN_LINK
+                text=kb_texts.get(lang, kb_texts["en"]),
+                url=JOIN_LINK # Убедитесь, что JOIN_LINK определена в конфиге
             )]
         ])
 
@@ -1447,8 +1442,8 @@ async def success(message: Message):
         )
 
     except Exception as e:
-        logger.error(f"Stars success error: {e}")
-        await message.answer("❌ Error processing payment")
+        logger.error(f"Критическая ошибка в success_payment_handler: {e}", exc_info=True)
+        await message.answer("❌ Произошла ошибка при обработке платежа. Мы уже разбираемся!")
 
 
 # ================== CARD CHECKER (FIXED & MULTILINGUAL) ==================
