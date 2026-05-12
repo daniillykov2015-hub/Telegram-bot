@@ -1421,96 +1421,92 @@ JOIN_LINK = "https://t.me/+ffk7dB_5zPhkMWFk"
 async def card_checker():
     while True:
         try:
-            async with aiosqlite.connect(DB_NAME) as db:
+            # Используем одно соединение на итерацию с таймаутом
+            async with aiosqlite.connect(DB_NAME, timeout=30) as db:
                 async with db.execute(
                     "SELECT payload, user_id, plan_id FROM card_invoices WHERE status='pending'"
                 ) as cur:
                     invoices = await cur.fetchall()
 
-            if not invoices:
-                await asyncio.sleep(5)
-                continue
+                if not invoices:
+                    await asyncio.sleep(5)
+                    continue
 
-            for transaction_id, user_id, plan_id in invoices:
-
-                try:
-                    # 🔒 сразу помечаем как processing (анти double trigger)
-                    async with aiosqlite.connect(DB_NAME) as db:
+                for transaction_id, user_id, plan_id in invoices:
+                    try:
+                        # 🔒 Блокируем запись
                         cursor = await db.execute(
-                            """
-                            UPDATE card_invoices
-                            SET status='processing'
-                            WHERE payload=? AND status='pending'
-                            """,
+                            "UPDATE card_invoices SET status='processing' WHERE payload=? AND status='pending'",
                             (transaction_id,)
                         )
                         await db.commit()
 
-                    if cursor.rowcount == 0:
-                        continue
-
-                    async with http_session.get(
-                        f"https://app.platega.io/transaction/{transaction_id}",
-                        headers={
-                            "X-MerchantId": MERCHANT_ID,
-                            "X-Secret": PAYMENT_TOKEN
-                        }
-                    ) as resp:
-
-                        if resp.status != 200:
+                        if cursor.rowcount == 0:
                             continue
 
-                        data = await resp.json()
+                        # Запрос к API
+                        async with http_session.get(
+                            f"https://app.platega.io/transaction/{transaction_id}",
+                            headers={
+                                "X-MerchantId": MERCHANT_ID,
+                                "X-Secret": PAYMENT_TOKEN
+                            }
+                        ) as resp:
+                            if resp.status != 200:
+                                await db.execute("UPDATE card_invoices SET status='pending' WHERE payload=?", (transaction_id,))
+                                await db.commit()
+                                continue
+                            data = await resp.json()
 
-                    status = str(data.get("status", "")).upper()
+                        status = str(data.get("status", "")).upper()
 
-                    if status not in ("CONFIRMED", "SUCCESS", "PAID"):
-                        # возвращаем обратно pending
-                        async with aiosqlite.connect(DB_NAME) as db:
-                            await db.execute(
-                                "UPDATE card_invoices SET status='pending' WHERE payload=?",
-                                (transaction_id,)
-                            )
+                        if status not in ("CONFIRMED", "SUCCESS", "PAID"):
+                            await db.execute("UPDATE card_invoices SET status='pending' WHERE payload=?", (transaction_id,))
                             await db.commit()
-                        continue
+                            continue
 
-                    days = PLANS[plan_id]["days"]
+                        # --- ОПЛАТА ПОДТВЕРЖДЕНА ---
+                        plan = PLANS.get(plan_id) or PLANS.get(str(plan_id))
+                        if not plan:
+                            continue
 
-                    await extend_user(user_id, days)
+                        days = plan["days"]
+                        await extend_user(user_id, days)
 
-                    if ADMIN_ID:
-                        try:
-                            await notify_admin(
-                                user_id=user_id,
-                                plan_name=PLANS[plan_id]["name"],
-                                method="Card / SBP 💳",
-                                extra=f"Tx: <code>{transaction_id}</code>"
-                            )
-                        except Exception as e:
-                            logger.error(f"Admin notify error: {e}")
+                        # ✅ СТАВИМ ФИНАЛЬНЫЙ СТАТУС (Чтобы не проверять повторно)
+                        await db.execute("UPDATE card_invoices SET status='paid' WHERE payload=?", (transaction_id,))
+                        await db.commit()
 
-                    text = (
-                        "✅ Payment successful!\n\n"
-                        f"🎉 Access: <b>{days} days</b>\n\n"
-                        "👇 Join the channel below"
-                    )
+                        # 📢 УВЕДОМЛЕНИЕ АДМИНА
+                        if ADMIN_ID:
+                            try:
+                                await notify_admin(
+                                    user_id=user_id,
+                                    plan_name=plan["name"],
+                                    method="Card / SBP 💳",
+                                    extra_info=f"Tx: <code>{transaction_id}</code>" # Проверь, чтобы было extra_info
+                                )
+                            except Exception as e:
+                                logger.error(f"Admin notify error: {e}")
 
-                    kb = InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(
-                            text="📢 Join Channel",
-                            url=JOIN_LINK
-                        )]
-                    ])
+                        # 📧 УВЕДОМЛЕНИЕ ЮЗЕРА
+                        text = (
+                            "✅ Payment successful!\n\n"
+                            f"🎉 Access: <b>{days} days</b>\n\n"
+                            "👇 Join the channel below"
+                        )
+                        kb = InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="📢 Join Channel", url=JOIN_LINK)]
+                        ])
 
-                    await bot.send_message(
-                        user_id,
-                        text,
-                        reply_markup=kb,
-                        parse_mode="HTML"
-                    )
+                        await bot.send_message(user_id, text, reply_markup=kb, parse_mode="HTML")
 
-                except Exception as e:
-                    logger.error(f"Card inner error: {e}")
+                    except Exception as e:
+                        logger.error(f"Card inner error: {e}")
+                        # В случае ошибки возвращаем в pending
+                        async with aiosqlite.connect(DB_NAME, timeout=30) as error_db:
+                            await error_db.execute("UPDATE card_invoices SET status='pending' WHERE payload=?", (transaction_id,))
+                            await error_db.commit()
 
         except Exception as e:
             logger.error(f"Card checker loop error: {e}")
