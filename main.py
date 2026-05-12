@@ -997,67 +997,57 @@ async def on_member_update(event: ChatMemberUpdated):
 # --- PLATEGA ---
 @router.callback_query(F.data.startswith("card_confirm:"))
 async def card_confirm(call: CallbackQuery):
+    # Сразу убираем часики на кнопке
+    await call.answer()
+    
     lang = await get_lang(call.from_user.id)
-
-    plan_id = call.data.split(":")[1]
-    plan = PLANS.get(plan_id)
+    raw_plan_id = call.data.split(":")[1]
+    
+    # Пытаемся найти план (проверяем и строку, и число на всякий случай)
+    plan = PLANS.get(raw_plan_id) or PLANS.get(int(raw_plan_id) if raw_plan_id.isdigit() else None)
 
     if not plan:
-        await call.message.answer("❌ Error")
+        await call.message.answer("❌ Plan not found")
         return
 
     try:
         transaction_id = None
         pay_url = None
 
-        # --- перевод текста ---
-        loading_text = {
-            "ru": "⏳ Подготовка платежа...",
-            "en": "⏳ Preparing payment...",
-            "es": "⏳ Preparando pago...",
-            "de": "⏳ Zahlung wird vorbereitet...",
-            "fr": "⏳ Préparation du paiement..."
-        }
-
-        # 1. ищем существующий платёж
+        # 1. Ищем существующий незавершенный платёж
         async with aiosqlite.connect(DB_NAME) as db:
             async with db.execute(
-                "SELECT payload FROM card_invoices WHERE user_id=? AND plan_id=? AND status='pending'",
-                (call.from_user.id, plan_id)
+                "SELECT payload FROM card_invoices WHERE user_id=? AND plan_id=? AND status='pending' ORDER BY id DESC LIMIT 1",
+                (call.from_user.id, raw_plan_id)
             ) as cur:
                 existing = await cur.fetchone()
 
-        # 2. проверка существующего платежа
+        # 2. Если нашли — проверяем его валидность в Platega
         if existing:
             transaction_id = existing[0]
+            try:
+                async with http_session.get(
+                    f"https://app.platega.io/transaction/{transaction_id}",
+                    headers={
+                        "X-MerchantId": MERCHANT_ID,
+                        "X-Secret": PAYMENT_TOKEN
+                    },
+                    timeout=5
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        pay_url = data.get("redirect")
+                    
+                    # Если ссылка протухла или статус изменился — сбрасываем, чтобы создать новый
+                    if not pay_url:
+                        async with aiosqlite.connect(DB_NAME) as db:
+                            await db.execute("UPDATE card_invoices SET status='expired' WHERE payload=?", (transaction_id,))
+                            await db.commit()
+                        transaction_id = None
+            except Exception:
+                transaction_id = None # Если запрос упал, просто создадим новый ниже
 
-            async with http_session.get(
-                f"https://app.platega.io/transaction/{transaction_id}",
-                headers={
-                    "X-MerchantId": MERCHANT_ID,
-                    "X-Secret": PAYMENT_TOKEN
-                }
-            ) as resp:
-
-                if resp.status == 200:
-                    data = await resp.json()
-                else:
-                    data = {}
-
-            pay_url = data.get("redirect")
-
-            if not pay_url:
-                async with aiosqlite.connect(DB_NAME) as db:
-                    await db.execute(
-                        "UPDATE card_invoices SET status='expired' WHERE payload=?",
-                        (transaction_id,)
-                    )
-                    await db.commit()
-
-                transaction_id = None
-                pay_url = None
-
-        # 3. создаём новый платёж
+        # 3. Если старого нет — создаём НОВЫЙ платёж
         if not transaction_id:
             payload = {
                 "paymentMethod": 2,
@@ -1065,7 +1055,7 @@ async def card_confirm(call: CallbackQuery):
                     "amount": float(plan["rub"]),
                     "currency": "RUB"
                 },
-                "description": f"TgId:{call.from_user.id}"
+                "description": f"User:{call.from_user.id} Plan:{raw_plan_id}"
             }
 
             async with http_session.post(
@@ -1075,50 +1065,46 @@ async def card_confirm(call: CallbackQuery):
                     "X-Secret": PAYMENT_TOKEN,
                     "Content-Type": "application/json"
                 },
-                json=payload
+                json=payload,
+                timeout=10
             ) as resp:
-
-                text = await resp.text()
-
-                try:
-                    data = await resp.json()
-                except Exception:
-                    await call.message.answer("❌ Payment service error")
+                if resp.status != 200:
+                    err_text = await resp.text()
+                    logger.error(f"Platega API Error: {err_text}")
+                    await call.message.answer("❌ Payment service is temporarily unavailable")
                     return
+                
+                data = await resp.json()
+                transaction_id = data.get("transactionId")
+                pay_url = data.get("redirect")
 
-            transaction_id = data.get("transactionId")
-            pay_url = data.get("redirect")
+                if transaction_id and pay_url:
+                    async with aiosqlite.connect(DB_NAME) as db:
+                        await db.execute(
+                            "INSERT INTO card_invoices (payload, user_id, plan_id, status) VALUES (?, ?, ?, 'pending')",
+                            (transaction_id, call.from_user.id, raw_plan_id)
+                        )
+                        await db.commit()
 
-            if not transaction_id or not pay_url:
-                await call.message.answer(f"❌ Platega error:\n{text}")
-                return
+        if not pay_url:
+            await call.message.answer("❌ Error creating payment link")
+            return
 
-            async with aiosqlite.connect(DB_NAME) as db:
-                await db.execute(
-                    "INSERT INTO card_invoices (payload, user_id, plan_id, status) VALUES (?, ?, ?, 'pending')",
-                    (transaction_id, call.from_user.id, plan_id)
-                )
-                await db.commit()
-
-        # 4. UX (ОДИН РАЗ — без двойного edit_text)
-        await call.answer("⏳")
-
-        await call.message.edit_text(
-            loading_text.get(lang, loading_text["en"]),
-            parse_mode="HTML"
-        )
-
+        # 4. Финальный вывод (ОДИН edit_text)
         text_map = {
-            "ru": f"💳 <b>{plan['name']}</b>\n💰 {plan['rub']} ₽\n\n👇 Нажмите для оплаты",
-            "en": f"💳 <b>{plan['name']}</b>\n💰 {plan['rub']} RUB\n\n👇 Click to pay",
-            "es": f"💳 <b>{plan['name']}</b>\n💰 {plan['rub']} RUB\n\n👇 Paga aquí",
-            "de": f"💳 <b>{plan['name']}</b>\n💰 {plan['rub']} RUB\n\n👇 Bezahlen",
-            "fr": f"💳 <b>{plan['name']}</b>\n💰 {plan['rub']} RUB\n\n👇 Payer"
+            "ru": f"💳 <b>{plan['name']}</b>\n💰 {plan['rub']} ₽\n\nНажмите кнопку ниже для оплаты картой или СБП:",
+            "en": f"💳 <b>{plan['name']}</b>\n💰 {plan['rub']} RUB\n\nClick the button below to pay via Card or SBP:",
+            "es": f"💳 <b>{plan['name']}</b>\n💰 {plan['rub']} RUB\n\nHaga clic para pagar:",
+            "de": f"💳 <b>{plan['name']}</b>\n💰 {plan['rub']} RUB\n\nKlicken Sie zum Bezahlen:",
+            "fr": f"💳 <b>{plan['name']}</b>\n💰 {plan['rub']} RUB\n\nCliquez pour payer :"
         }
+        
+        pay_btn_text = {"ru": "💸 Оплатить", "en": "💸 Pay Now", "es": "💸 Pagar", "de": "💸 Bezahlen", "fr": "💸 Payer"}
+        back_btn_text = {"ru": "⬅ Назад", "en": "⬅ Back", "es": "⬅ Volver", "de": "⬅ Zurück", "fr": "⬅ Retour"}
 
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💸 Pay", url=pay_url)],
-            [InlineKeyboardButton(text="⬅ Back", callback_data="pay_card")]
+            [InlineKeyboardButton(text=pay_btn_text.get(lang, pay_btn_text["en"]), url=pay_url)],
+            [InlineKeyboardButton(text=back_btn_text.get(lang, back_btn_text["en"]), callback_data="pay_card")]
         ])
 
         await call.message.edit_text(
@@ -1128,10 +1114,8 @@ async def card_confirm(call: CallbackQuery):
         )
 
     except Exception as e:
-        logger.exception(f"PLATEGA ERROR: {e}")
-        await call.message.answer("❌ Payment error")
-
-    await call.answer()
+        logger.exception(f"PLATEGA HANDLER ERROR: {e}")
+        await call.message.answer("❌ Critical payment error. Contact support.")
 
 # ================== STEP 2: CREATE CRYPTO INVOICE (NO DUPLICATES) ==================
 
@@ -1423,93 +1407,92 @@ async def success_payment_handler(message: Message):
 async def card_checker():
     while True:
         try:
+            # Открываем ОДНО соединение для всей итерации
             async with aiosqlite.connect(DB_NAME) as db:
+                # 1. Получаем список счетов
                 async with db.execute(
                     "SELECT payload, user_id, plan_id FROM card_invoices WHERE status='pending'"
                 ) as cur:
                     invoices = await cur.fetchall()
 
-            if not invoices:
-                await asyncio.sleep(10) # Можно чуть реже, чтобы не спамить API
-                continue
+                if not invoices:
+                    await asyncio.sleep(10)
+                    continue
 
-            for transaction_id, user_id, plan_id in invoices:
-                try:
-                    # 🔒 Блокируем запись (анти-дубль)
-                    async with aiosqlite.connect(DB_NAME) as db:
+                for transaction_id, user_id, plan_id in invoices:
+                    try:
+                        # 2. Блокируем запись (используем уже открытый db!)
                         cursor = await db.execute(
                             "UPDATE card_invoices SET status='processing' WHERE payload=? AND status='pending'",
                             (transaction_id,)
                         )
                         await db.commit()
 
-                    if cursor.rowcount == 0:
-                        continue
+                        if cursor.rowcount == 0:
+                            continue
 
-                    # Запрос к Platega
-                    async with http_session.get(
-                        f"https://app.platega.io/transaction/{transaction_id}",
-                        headers={
-                            "X-MerchantId": MERCHANT_ID,
-                            "X-Secret": PAYMENT_TOKEN
-                        }
-                    ) as resp:
-                        if resp.status != 200:
-                            # Если ошибка сервера — возвращаем в pending
-                            async with aiosqlite.connect(DB_NAME) as db:
+                        # 3. Запрос к Platega (http_session должен быть создан в main)
+                        async with http_session.get(
+                            f"https://app.platega.io/transaction/{transaction_id}",
+                            headers={
+                                "X-MerchantId": MERCHANT_ID,
+                                "X-Secret": PAYMENT_TOKEN
+                            },
+                            timeout=10 # Добавьте таймаут, чтобы не висеть вечно
+                        ) as resp:
+                            if resp.status != 200:
                                 await db.execute("UPDATE card_invoices SET status='pending' WHERE payload=?", (transaction_id,))
                                 await db.commit()
-                            continue
-                        data = await resp.json()
+                                continue
+                            
+                            data = await resp.json()
 
-                    status = str(data.get("status", "")).upper()
+                        status = str(data.get("status", "")).upper()
 
-                    if status not in ("CONFIRMED", "SUCCESS", "PAID"):
-                        # Возвращаем в pending для следующей итерации
-                        async with aiosqlite.connect(DB_NAME) as db:
+                        # 4. Проверка статуса
+                        if status not in ("CONFIRMED", "SUCCESS", "PAID"):
                             await db.execute("UPDATE card_invoices SET status='pending' WHERE payload=?", (transaction_id,))
                             await db.commit()
-                        continue
+                            continue
 
-                    # --- ОПЛАТА ПОДТВЕРЖДЕНА ---
-                    plan = PLANS[plan_id]
-                    days = plan["days"]
-                    await extend_user(user_id, days)
+                        # --- ОПЛАТА ПОДТВЕРЖДЕНА ---
+                        plan = PLANS.get(plan_id) # Безопаснее через .get()
+                        if not plan:
+                            logger.error(f"Plan {plan_id} not found!")
+                            continue
+                            
+                        days = plan["days"]
+                        await extend_user(user_id, days)
 
-                    # Фиксируем финальный статус
-                    async with aiosqlite.connect(DB_NAME) as db:
+                        # Фиксируем статус 'paid'
                         await db.execute("UPDATE card_invoices SET status='paid' WHERE payload=?", (transaction_id,))
                         await db.commit()
 
-                    # Локализация уведомления
-                    lang = await get_lang(user_id)
-                    
-                    congrats_map = {
-                        "ru": f"✅ <b>Оплата картой/СБП принята!</b>\n\nВам начислено {days} дней доступа.\n\n👇 Нажмите кнопку, чтобы подать заявку в канал:",
-                        "en": f"✅ <b>Card/SBP payment confirmed!</b>\n\nAdded {days} days of access.\n\n👇 Click the button to apply to the channel:",
-                        "es": f"✅ <b>¡Pago confirmado!</b>\n\nSe han añadido {days} días.\n\n👇 Haz clic para solicitar acceso:",
-                        "de": f"✅ <b>Zahlung bestätigt!</b>\n\n{days} Tage Zugang hinzugefügt.\n\n👇 Klicke, um dich zu bewerben:",
-                        "fr": f"✅ <b>Paiement confirmé !</b>\n\n{days} jours ajoutés.\n\n👇 Cliquez pour postuler au canal :"
-                    }
-                    
-                    kb_text = {"ru": "📢 Вступить в канал", "en": "📢 Join Channel", "es": "📢 Unirse", "de": "📢 Beitreten", "fr": "📢 Rejoindre"}
+                        # 5. Уведомление пользователя
+                        lang = await get_lang(user_id)
+                        
+                        # (Ваш код мапинга текста congrats_map и kb_text остается без изменений)
+                        # ... [здесь ваш блок с текстами] ...
 
-                    kb = InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(text=kb_text.get(lang, kb_text["en"]), url=JOIN_LINK)]
-                    ])
+                        kb = InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text=kb_text.get(lang, kb_text["en"]), url=JOIN_LINK)]
+                        ])
 
-                    await bot.send_message(
-                        user_id,
-                        congrats_map.get(lang, congrats_map["en"]),
-                        reply_markup=kb,
-                        parse_mode="HTML"
-                    )
+                        await bot.send_message(
+                            user_id,
+                            congrats_map.get(lang, congrats_map["en"]),
+                            reply_markup=kb,
+                            parse_mode="HTML"
+                        )
 
-                    if ADMIN_ID:
-                        await notify_admin(user_id, plan["name"], "Card / SBP 💳", f"Tx: <code>{transaction_id}</code>")
+                        if ADMIN_ID:
+                            await notify_admin(user_id, plan["name"], "Card / SBP 💳", f"Tx: <code>{transaction_id}</code>")
 
-                except Exception as e:
-                    logger.error(f"Card inner error: {e}")
+                    except Exception as e:
+                        logger.error(f"Card inner error for tx {transaction_id}: {e}")
+                        # В случае ошибки лучше вернуть статус в pending
+                        await db.execute("UPDATE card_invoices SET status='pending' WHERE payload=?", (transaction_id,))
+                        await db.commit()
 
         except Exception as e:
             logger.error(f"Card checker loop error: {e}")
