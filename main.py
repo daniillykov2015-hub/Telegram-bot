@@ -1418,10 +1418,45 @@ async def success(message: Message):
 
 JOIN_LINK = "https://t.me/+ffk7dB_5zPhkMWFk"
 
+# --- БЛОК 1: Функция уведомления админа ---
+async def notify_admin(user_id, plan_name, method, extra_info=""):
+    """Универсальная функция для отправки уведомлений админу об оплатах"""
+    try:
+        # Пытаемся получить данные о пользователе через бота для красоты уведомления
+        try:
+            chat = await bot.get_chat(user_id)
+            user_link = f"@{chat.username}" if chat.username else "нет username"
+            full_name = chat.full_name or "Пользователь"
+        except Exception:
+            user_link = "скрыт/нет"
+            full_name = "Пользователь"
+
+        # Формируем текст уведомления
+        admin_msg = (
+            f"💰 <b>Новая оплата!</b>\n\n"
+            f"👤 Пользователь: {full_name} ({user_link})\n"
+            f"🆔 ID: <code>{user_id}</code>\n"
+            f"📦 Тариф: {plan_name}\n"
+            f"💳 Способ: {method}\n"
+            f"ℹ️ {extra_info}"
+        )
+
+        if ADMIN_ID:
+            await bot.send_message(ADMIN_ID, admin_msg, parse_mode="HTML")
+            print(f"✅ Уведомление об оплате {user_id} отправлено админу.")
+        
+    except Exception as e:
+        if 'logger' in globals():
+            logger.error(f"Ошибка в notify_admin: {e}")
+        else:
+            print(f"Ошибка в notify_admin: {e}")
+
+# --- БЛОК 2: Основной чекер платежей по картам ---
 async def card_checker():
+    print("🚀 Чекер карт запущен и работает...")
     while True:
         try:
-            # Используем одно соединение на итерацию с таймаутом
+            # Используем одно соединение на итерацию с таймаутом для стабильности БД
             async with aiosqlite.connect(DB_NAME, timeout=30) as db:
                 async with db.execute(
                     "SELECT payload, user_id, plan_id FROM card_invoices WHERE status='pending'"
@@ -1434,7 +1469,7 @@ async def card_checker():
 
                 for transaction_id, user_id, plan_id in invoices:
                     try:
-                        # 🔒 Блокируем запись
+                        # 🔒 Блокируем запись, чтобы избежать двойных начислений
                         cursor = await db.execute(
                             "UPDATE card_invoices SET status='processing' WHERE payload=? AND status='pending'",
                             (transaction_id,)
@@ -1444,13 +1479,14 @@ async def card_checker():
                         if cursor.rowcount == 0:
                             continue
 
-                        # Запрос к API
+                        # Запрос к API Platega для проверки реальности платежа
                         async with http_session.get(
                             f"https://app.platega.io/transaction/{transaction_id}",
                             headers={
                                 "X-MerchantId": MERCHANT_ID,
                                 "X-Secret": PAYMENT_TOKEN
-                            }
+                            },
+                            timeout=10
                         ) as resp:
                             if resp.status != 200:
                                 await db.execute("UPDATE card_invoices SET status='pending' WHERE payload=?", (transaction_id,))
@@ -1460,38 +1496,39 @@ async def card_checker():
 
                         status = str(data.get("status", "")).upper()
 
+                        # Если платеж еще не подтвержден в системе оплаты
                         if status not in ("CONFIRMED", "SUCCESS", "PAID"):
                             await db.execute("UPDATE card_invoices SET status='pending' WHERE payload=?", (transaction_id,))
                             await db.commit()
                             continue
 
                         # --- ОПЛАТА ПОДТВЕРЖДЕНА ---
+                        # Находим тариф в словаре (с проверкой типа данных)
                         plan = PLANS.get(plan_id) or PLANS.get(str(plan_id))
                         if not plan:
+                            print(f"⚠️ План {plan_id} не найден в PLANS!")
                             continue
 
                         days = plan["days"]
+                        
+                        # 1. Продлеваем подписку в БД
                         await extend_user(user_id, days)
 
-                        # ✅ СТАВИМ ФИНАЛЬНЫЙ СТАТУС (Чтобы не проверять повторно)
+                        # 2. ✅ СТАВИМ ФИНАЛЬНЫЙ СТАТУС (Обязательно ПЕРЕД уведомлениями)
                         await db.execute("UPDATE card_invoices SET status='paid' WHERE payload=?", (transaction_id,))
                         await db.commit()
 
-                        # 📢 УВЕДОМЛЕНИЕ АДМИНА
-                        if ADMIN_ID:
-                            try:
-                                await notify_admin(
-                                    user_id=user_id,
-                                    plan_name=plan["name"],
-                                    method="Card / SBP 💳",
-                                    extra_info=f"Tx: <code>{transaction_id}</code>" # Проверь, чтобы было extra_info
-                                )
-                            except Exception as e:
-                                logger.error(f"Admin notify error: {e}")
+                        # 3. 📢 УВЕДОМЛЯЕМ ТЕБЯ (Админа)
+                        await notify_admin(
+                            user_id=user_id,
+                            plan_name=plan["name"],
+                            method="Card / SBP 💳",
+                            extra_info=f"Tx: <code>{transaction_id}</code>"
+                        )
 
-                        # 📧 УВЕДОМЛЕНИЕ ЮЗЕРА
+                        # 4. 📧 УВЕДОМЛЯЕМ ПОЛЬЗОВАТЕЛЯ
                         text = (
-                            "✅ Payment successful!\n\n"
+                            "✅ <b>Payment successful!</b>\n\n"
                             f"🎉 Access: <b>{days} days</b>\n\n"
                             "👇 Join the channel below"
                         )
@@ -1502,14 +1539,14 @@ async def card_checker():
                         await bot.send_message(user_id, text, reply_markup=kb, parse_mode="HTML")
 
                     except Exception as e:
-                        logger.error(f"Card inner error: {e}")
-                        # В случае ошибки возвращаем в pending
+                        print(f"❌ Ошибка обработки транзакции {transaction_id}: {e}")
+                        # В случае сбоя возвращаем статус, чтобы попробовать еще раз
                         async with aiosqlite.connect(DB_NAME, timeout=30) as error_db:
                             await error_db.execute("UPDATE card_invoices SET status='pending' WHERE payload=?", (transaction_id,))
                             await error_db.commit()
 
         except Exception as e:
-            logger.error(f"Card checker loop error: {e}")
+            print(f"🛑 Критическая ошибка в цикле card_checker: {e}")
 
         await asyncio.sleep(5)
 
