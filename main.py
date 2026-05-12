@@ -220,7 +220,7 @@ PLANS = {
     "1": {
         "name": "1 день", 
         "days": 1,
-        "rub": 10,    
+        "rub": 690,    
         "stars": 790,  
         "crypto": 9    
     },
@@ -1550,106 +1550,120 @@ async def card_checker():
 
         await asyncio.sleep(5)
 
+# 1. Ссылка должна быть определена в начале кода
+JOIN_LINK = "https://t.me/+ffk7dB_5zPhkMWFk"
+
 async def crypto_checker():
+    print("🚀 Крипточекер запущен...")
     while True:
         try:
-            async with aiosqlite.connect(DB_NAME) as db:
+            # Используем таймаут 30 секунд для предотвращения блокировки SQLite
+            async with aiosqlite.connect(DB_NAME, timeout=30) as db:
                 async with db.execute(
                     "SELECT invoice_id, user_id, plan_id FROM crypto_invoices WHERE status='pending'"
                 ) as cur:
                     invoices = await cur.fetchall()
 
-            if not invoices:
-                await asyncio.sleep(15)
-                continue
+                if not invoices:
+                    await asyncio.sleep(15)
+                    continue
 
-            for inv_id, user_id, plan_id in invoices:
-
-                try:
-                    # 🔒 блокируем обработку сразу
-                    async with aiosqlite.connect(DB_NAME) as db:
+                for inv_id, user_id, plan_id in invoices:
+                    try:
+                        # 🔒 Блокируем обработку, чтобы не начислить дважды
                         cursor = await db.execute(
-                            """
-                            UPDATE crypto_invoices
-                            SET status='processing'
-                            WHERE invoice_id=? AND status='pending'
-                            """,
+                            "UPDATE crypto_invoices SET status='processing' WHERE invoice_id=? AND status='pending'",
                             (inv_id,)
                         )
                         await db.commit()
 
-                    if cursor.rowcount == 0:
-                        continue
-
-                    async with http_session.get(
-                        "https://pay.crypt.bot/api/getInvoices",
-                        headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
-                        params={"invoice_ids": inv_id}
-                    ) as resp:
-
-                        if resp.status != 200:
-                            logger.error(f"Crypto HTTP error: {resp.status}")
+                        if cursor.rowcount == 0:
                             continue
 
-                        data = await resp.json()
+                        # Запрос к CryptoBot API
+                        async with http_session.get(
+                            "https://pay.crypt.bot/api/getInvoices",
+                            headers={"Crypto-Pay-API-Token": CRYPTO_TOKEN},
+                            params={"invoice_ids": inv_id},
+                            timeout=10
+                        ) as resp:
+                            if resp.status != 200:
+                                await db.execute("UPDATE crypto_invoices SET status='pending' WHERE invoice_id=?", (inv_id,))
+                                await db.commit()
+                                continue
+                            data = await resp.json()
 
-                    if not isinstance(data, dict) or not data.get("ok"):
-                        logger.error(f"Crypto API error: {data}")
-                        continue
+                        if not data.get("ok"):
+                            await db.execute("UPDATE crypto_invoices SET status='pending' WHERE invoice_id=?", (inv_id,))
+                            await db.commit()
+                            continue
 
-                    items = data.get("result", {}).get("items", [])
-                    if not items:
-                        continue
+                        items = data.get("result", {}).get("items", [])
+                        if not items:
+                            await db.execute("UPDATE crypto_invoices SET status='pending' WHERE invoice_id=?", (inv_id,))
+                            await db.commit()
+                            continue
 
-                    status = items[0].get("status")
+                        status = items[0].get("status")
 
-                    if status != "paid":
-                        # вернуть обратно pending
-                        async with aiosqlite.connect(DB_NAME) as db:
-                            await db.execute(
-                                "UPDATE crypto_invoices SET status='pending' WHERE invoice_id=?",
+                        if status != "paid":
+                            # Если еще не оплачено, возвращаем статус для следующей проверки
+                            await db.execute("UPDATE crypto_invoices SET status='pending' WHERE invoice_id=?", (inv_id,))
+                            await db.commit()
+                            continue
+
+                        # --- ОПЛАТА ПОДТВЕРЖДЕНА ---
+                        
+                        # Находим план (учитываем возможные типы данных ID)
+                        plan = PLANS.get(plan_id) or PLANS.get(str(plan_id))
+                        if not plan:
+                            continue
+
+                        days = plan["days"]
+                        await extend_user(user_id, days)
+
+                        # ✅ ФИКСАЦИЯ: Помечаем как 'success', чтобы чекер больше не брал эту запись
+                        await db.execute(
+                            "UPDATE crypto_invoices SET status='success' WHERE invoice_id=?",
+                            (inv_id,)
+                        )
+                        await db.commit()
+
+                        # 📢 УВЕДОМЛЕНИЕ АДМИНА
+                        if ADMIN_ID:
+                            try:
+                                await notify_admin(
+                                    user_id=user_id,
+                                    plan_name=plan["name"],
+                                    method="Crypto 💰",
+                                    extra_info=f"Invoice: <code>{inv_id}</code>"
+                                )
+                            except Exception as e:
+                                logger.error(f"Admin notify error: {e}")
+
+                        # 📧 УВЕДОМЛЕНИЕ ЮЗЕРА (С КНОПКОЙ-ССЫЛКОЙ)
+                        text = (
+                            "✅ <b>Crypto payment confirmed!</b>\n\n"
+                            f"🎉 Access: <b>{days} days</b>\n\n"
+                            "👇 Join the channel below"
+                        )
+                        
+                        # Создаем клавиатуру с ссылкой
+                        kb = InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="📢 Join Channel", url=JOIN_LINK)]
+                        ])
+
+                        await bot.send_message(user_id, text, reply_markup=kb, parse_mode="HTML")
+
+                    except Exception as e:
+                        logger.error(f"Crypto inner error: {e}")
+                        # В случае ошибки возвращаем транзакцию в очередь
+                        async with aiosqlite.connect(DB_NAME, timeout=30) as error_db:
+                            await error_db.execute(
+                                "UPDATE crypto_invoices SET status='pending' WHERE invoice_id=?", 
                                 (inv_id,)
                             )
-                            await db.commit()
-                        continue
-
-                    days = PLANS[plan_id]["days"]
-
-                    await extend_user(user_id, days)
-
-                    if ADMIN_ID:
-                        try:
-                            await notify_admin(
-                                user_id=user_id,
-                                plan_name=PLANS[plan_id]["name"],
-                                method="Crypto 💰",
-                                extra=f"Invoice: <code>{inv_id}</code>"
-                            )
-                        except Exception as e:
-                            logger.error(f"Admin notify error: {e}")
-
-                    text = (
-                        "✅ Crypto payment confirmed!\n\n"
-                        f"🎉 Access: <b>{days} days</b>\n\n"
-                        "👇 Join the channel below"
-                    )
-
-                    kb = InlineKeyboardMarkup(inline_keyboard=[
-                        [InlineKeyboardButton(
-                            text="📢 Join Channel",
-                            url=JOIN_LINK
-                        )]
-                    ])
-
-                    await bot.send_message(
-                        user_id,
-                        text,
-                        reply_markup=kb,
-                        parse_mode="HTML"
-                    )
-
-                except Exception as e:
-                    logger.error(f"Crypto inner error: {e}")
+                            await error_db.commit()
 
         except Exception as e:
             logger.error(f"Crypto checker loop error: {e}")
