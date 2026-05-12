@@ -1063,6 +1063,34 @@ async def card_confirm(call: CallbackQuery):
 
     await call.answer()
 
+@router.callback_query(F.data == "crypto")
+async def crypto_menu(call: CallbackQuery):
+    lang = await get_lang(call.from_user.id)
+
+    text = {
+        "ru": "💰 <b>Выберите тариф (Crypto)</b>",
+        "en": "💰 <b>Choose plan (Crypto)</b>"
+    }
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text=f"{p['name']} — {p['crypto']} USDT",
+                callback_data=f"crypto_confirm:{k}"
+            )
+        ]
+        for k, p in PLANS.items()
+    ] + [
+        [InlineKeyboardButton(text="⬅ Back", callback_data="back")]
+    ])
+
+    await call.message.edit_text(
+        text.get(lang, text["en"]),
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+    await call.answer()
+
 @router.callback_query(F.data.startswith("crypto_confirm:"))
 async def crypto_confirm(call: CallbackQuery):
     # 1. Сразу отвечаем серверу Telegram, чтобы кнопка не зависала (убираем часики)
