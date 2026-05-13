@@ -609,32 +609,38 @@ async def show_lang_menu_callback(call: CallbackQuery):
     await call.answer()
 
 # ================== HANDLERS ==================
-# --- ADMIN BROADCAST ---
 @router.message(F.text.startswith("/broadcast"), F.from_user.id == ADMIN_ID)
 async def start_broadcast(message: Message, bot: Bot):
-    # Извлекаем текст сообщения (все, что идет после команды /broadcast)
     broadcast_text = message.text.replace("/broadcast", "").strip()
     
     if not broadcast_text:
-        await message.answer("❌ <b>Ошибка:</b> Введите текст после команды.\nПример: <code>/broadcast Привет!</code>")
+        await message.answer("❌ Введите текст: <code>/broadcast текст</code>")
         return
 
-    # Получаем список всех ID пользователей из базы данных
     async with aiosqlite.connect(DB_NAME) as db:
+        # Проверяем, сколько вообще людей в базе для теста
+        async with db.execute("SELECT COUNT(*) FROM users") as c:
+            total_count = (await c.fetchone())[0]
+            logger.info(f"Всего пользователей в БД: {total_count}")
+
         async with db.execute("SELECT user_id FROM users") as cursor:
             users = await cursor.fetchall()
     
+    if not users:
+        await message.answer(f"⚠️ База данных пуста (всего в БД: {total_count}). Рассылать некому.")
+        return
+
     count = 0
-    # Отправляем сообщение каждому пользователю
     for (user_id,) in users:
         try:
-            await bot.send_message(user_id, broadcast_text, parse_mode="HTML")
+            await bot.send_message(user_id, broadcast_text)
             count += 1
-        except Exception:
-            # Если пользователь заблокировал бота, просто идем дальше
+            await asyncio.sleep(0.05) # Защита от спам-фильтра Telegram
+        except Exception as e:
+            logger.error(f"Ошибка отправки пользователю {user_id}: {e}")
             continue
             
-    await message.answer(f"✅ <b>Рассылка завершена!</b>\nОтправлено: {count} пользователям.")
+    await message.answer(f"✅ <b>Рассылка завершена!</b>\nНайдено в базе: {len(users)}\nОтправлено: {count}")
 
 @router.callback_query(F.data.startswith("lang:"))
 async def set_lang(call: CallbackQuery):
